@@ -1,0 +1,2 @@
+import type { Config } from "tailwindcss";
+export default { darkMode: "class", content: ["./src/**/*.{ts,tsx}"], theme: { extend: { fontFamily: { sans: ["var(--font-sans)","sans-serif"] }, colors: { ink:"hsl(var(--ink))", canvas:"hsl(var(--canvas))", panel:"hsl(var(--panel))", brand:"hsl(var(--brand))", muted:"hsl(var(--muted))", line:"hsl(var(--line))" }, boxShadow:{ soft:"0 24px 80px -32px rgba(15,23,42,.25)" } } }, plugins: [] } satisfies Config;

@@ -1,0 +1,1 @@
+import{z}from"zod";export const studentSchema=z.object({name:z.string().trim().min(2).max(100),email:z.string().email(),classId:z.string().cuid(),parentName:z.string().trim().min(2).max(100)});export const paymentSignatureSchema=z.object({razorpay_order_id:z.string().min(1),razorpay_payment_id:z.string().min(1),razorpay_signature:z.string().regex(/^[a-f0-9]{64}$/)});

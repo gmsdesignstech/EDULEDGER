@@ -1,0 +1,2 @@
+import Link from"next/link";import{Logo}from"./logo";
+export function LegalPage({title,children}:{title:string;children:React.ReactNode}){return <main className="min-h-screen bg-canvas px-5 py-10"><article className="mx-auto max-w-3xl"><Logo/><Link href="/" className="mt-12 inline-block text-sm font-bold text-brand">← Back to home</Link><h1 className="mt-5 text-4xl font-black">{title}</h1><p className="mt-2 text-sm text-muted">Last updated: 11 September 2026</p><div className="mt-10 space-y-6 leading-7 text-muted">{children}</div></article></main>}
