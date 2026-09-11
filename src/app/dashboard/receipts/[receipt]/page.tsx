@@ -1,2 +1,123 @@
-import Link from"next/link";import{notFound}from"next/navigation";import{Download}from"lucide-react";import{getInstitution,getReceipt}from"@/lib/db";import{requireUser}from"@/lib/session";import{PrintButton}from"@/components/print-button";export const runtime="nodejs";const money=(n:number)=>new Intl.NumberFormat("en-IN",{style:"currency",currency:"INR"}).format(n);
-export default async function Receipt({params}:{params:Promise<{receipt:string}>}){const user=await requireUser(),number=decodeURIComponent((await params).receipt),payment=getReceipt(user.institutionId,number);if(!payment)notFound();const school=getInstitution(user.institutionId);return <div className="mx-auto max-w-3xl"><div className="mb-5 flex flex-wrap justify-between gap-3 print:hidden"><Link href="/dashboard/payment-history" className="btn-secondary">Back to payment history</Link><div className="flex gap-2"><a className="btn-secondary" href={`/api/receipts/${number}/pdf`}><Download className="size-4"/>Download PDF</a><PrintButton/></div></div><article className="rounded-2xl border bg-white p-8 text-slate-900 shadow-soft sm:p-12"><header className="flex justify-between border-b pb-7"><div><h1 className="text-2xl font-black">{school.name}</h1><p className="mt-1 max-w-md text-sm text-slate-500">{school.address||"School administration"}<br/>{[school.phone,school.email].filter(Boolean).join(" · ")}</p></div><div className="grid size-16 place-items-center rounded-2xl bg-emerald-600 text-xl font-black text-white">EL</div></header><div className="mt-8 flex flex-col justify-between gap-4 sm:flex-row"><div><p className="text-xs font-bold uppercase tracking-widest text-emerald-600">Fee payment receipt</p><h2 className="mt-2 text-xl font-black">{payment.receiptNumber}</h2></div><div className="text-sm sm:text-right"><b>{payment.invoiceNumber}</b><p className="text-slate-500">Paid on {payment.paymentDate}</p></div></div><section className="mt-8 rounded-2xl bg-slate-50 p-5"><p className="text-xs font-bold uppercase text-slate-500">Student details</p><h3 className="mt-2 text-lg font-bold">{payment.studentName}</h3><p className="text-sm text-slate-500">Admission {payment.admission} · {payment.className}-{payment.section}</p></section><div className="mt-8 divide-y text-sm">{[["Total fee",payment.previouslyPaid+payment.amount+payment.remainingBalance],["Previously paid",payment.previouslyPaid],["Current payment",payment.amount],["Total paid",payment.totalPaid],["Remaining balance",payment.remainingBalance]].map(([label,value])=><div className={`flex justify-between py-3 ${label==="Current payment"?"font-bold text-emerald-700":""}`} key={String(label)}><span>{label}</span><b>{money(Number(value))}</b></div>)}</div><div className="mt-7 grid gap-3 border-t pt-6 text-sm sm:grid-cols-2"><p><span className="text-slate-500">Payment method</span><b className="block">{payment.method}</b></p><p><span className="text-slate-500">Transaction ID</span><b className="block">{payment.transactionId||"Not applicable"}</b></p><p><span className="text-slate-500">Status</span><b className="block text-emerald-600">{payment.status}</b></p></div><footer className="mt-16 flex justify-between text-sm"><p className="text-emerald-700"><b>Thank you for your payment.</b><br/><span className="text-xs text-slate-500">Generated from the school fee ledger.</span></p><div className="border-t border-slate-500 px-5 pt-2 font-bold">Authorized signature</div></footer></article></div>}
+import Link from "next/link";
+import { notFound } from "next/navigation";
+import { Download } from "lucide-react";
+import { getInstitution, getReceipt } from "@/lib/db";
+import { requireUser } from "@/lib/session";
+import { PrintButton } from "@/components/print-button";
+export const runtime = "nodejs";
+const money = (n: number) =>
+  new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR" }).format(
+    n,
+  );
+export default async function Receipt({
+  params,
+}: {
+  params: Promise<{ receipt: string }>;
+}) {
+  const user = await requireUser(),
+    number = decodeURIComponent((await params).receipt),
+    payment = await getReceipt(user.institutionId, number);
+  if (!payment) notFound();
+  const school = await getInstitution(user.institutionId);
+  return (
+    <div className="mx-auto max-w-3xl">
+      <div className="mb-5 flex flex-wrap justify-between gap-3 print:hidden">
+        <Link href="/dashboard/payment-history" className="btn-secondary">
+          Back to payment history
+        </Link>
+        <div className="flex gap-2">
+          <a className="btn-secondary" href={`/api/receipts/${number}/pdf`}>
+            <Download className="size-4" />
+            Download PDF
+          </a>
+          <PrintButton />
+        </div>
+      </div>
+      <article className="rounded-2xl border bg-white p-8 text-slate-900 shadow-soft sm:p-12">
+        <header className="flex justify-between border-b pb-7">
+          <div>
+            <h1 className="text-2xl font-black">{school.name}</h1>
+            <p className="mt-1 max-w-md text-sm text-slate-500">
+              {school.address || "School administration"}
+              <br />
+              {[school.phone, school.email].filter(Boolean).join(" · ")}
+            </p>
+          </div>
+          <div className="grid size-16 place-items-center rounded-2xl bg-emerald-600 text-xl font-black text-white">
+            EL
+          </div>
+        </header>
+        <div className="mt-8 flex flex-col justify-between gap-4 sm:flex-row">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-widest text-emerald-600">
+              Fee payment receipt
+            </p>
+            <h2 className="mt-2 text-xl font-black">{payment.receiptNumber}</h2>
+          </div>
+          <div className="text-sm sm:text-right">
+            <b>{payment.invoiceNumber}</b>
+            <p className="text-slate-500">Paid on {payment.paymentDate}</p>
+          </div>
+        </div>
+        <section className="mt-8 rounded-2xl bg-slate-50 p-5">
+          <p className="text-xs font-bold uppercase text-slate-500">
+            Student details
+          </p>
+          <h3 className="mt-2 text-lg font-bold">{payment.studentName}</h3>
+          <p className="text-sm text-slate-500">
+            Admission {payment.admission} · {payment.className}-
+            {payment.section}
+          </p>
+        </section>
+        <div className="mt-8 divide-y text-sm">
+          {[
+            [
+              "Total fee",
+              payment.previouslyPaid +
+                payment.amount +
+                payment.remainingBalance,
+            ],
+            ["Previously paid", payment.previouslyPaid],
+            ["Current payment", payment.amount],
+            ["Total paid", payment.totalPaid],
+            ["Remaining balance", payment.remainingBalance],
+          ].map(([label, value]) => (
+            <div
+              className={`flex justify-between py-3 ${label === "Current payment" ? "font-bold text-emerald-700" : ""}`}
+              key={String(label)}
+            >
+              <span>{label}</span>
+              <b>{money(Number(value))}</b>
+            </div>
+          ))}
+        </div>
+        <div className="mt-7 grid gap-3 border-t pt-6 text-sm sm:grid-cols-2">
+          <p>
+            <span className="text-slate-500">Payment method</span>
+            <b className="block">{payment.method}</b>
+          </p>
+          <p>
+            <span className="text-slate-500">Transaction ID</span>
+            <b className="block">{payment.transactionId || "Not applicable"}</b>
+          </p>
+          <p>
+            <span className="text-slate-500">Status</span>
+            <b className="block text-emerald-600">{payment.status}</b>
+          </p>
+        </div>
+        <footer className="mt-16 flex justify-between text-sm">
+          <p className="text-emerald-700">
+            <b>Thank you for your payment.</b>
+            <br />
+            <span className="text-xs text-slate-500">
+              Generated from the school fee ledger.
+            </span>
+          </p>
+          <div className="border-t border-slate-500 px-5 pt-2 font-bold">
+            Authorized signature
+          </div>
+        </footer>
+      </article>
+    </div>
+  );
+}

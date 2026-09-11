@@ -1,2 +1,122 @@
-import{NextResponse}from"next/server";import{PDFDocument,StandardFonts,rgb}from"pdf-lib";import{currentUser}from"@/lib/session";import{getInstitution,getReceipt}from"@/lib/db";export const runtime="nodejs";
-export async function GET(_:Request,{params}:{params:Promise<{receipt:string}>}){const user=await currentUser();if(!user)return NextResponse.json({error:"Unauthenticated"},{status:401});const receipt=getReceipt(user.institutionId,decodeURIComponent((await params).receipt));if(!receipt)return NextResponse.json({error:"Receipt not found"},{status:404});const school=getInstitution(user.institutionId),doc=await PDFDocument.create(),page=doc.addPage([595,842]),font=await doc.embedFont(StandardFonts.Helvetica),bold=await doc.embedFont(StandardFonts.HelveticaBold),green=rgb(.06,.55,.42),dark=rgb(.08,.12,.2),gray=rgb(.38,.43,.5);const text=(value:string,x:number,y:number,size=10,isBold=false,color=dark)=>page.drawText(value,{x,y,size,font:isBold?bold:font,color});page.drawRectangle({x:0,y:770,width:595,height:72,color:dark});text(school.name.toUpperCase(),42,808,18,true,rgb(1,1,1));text([school.address,school.phone,school.email].filter(Boolean).join(" | ")||"School Administration",42,788,9,false,rgb(.85,.88,.92));text("FEE PAYMENT RECEIPT",42,730,22,true,green);text(`Receipt: ${receipt.receiptNumber}`,42,700,11,true);text(`Invoice: ${receipt.invoiceNumber}`,320,700,11,true);text(`Payment date: ${receipt.paymentDate}`,42,680,10);page.drawLine({start:{x:42,y:660},end:{x:553,y:660},thickness:1,color:rgb(.86,.88,.9)});text("STUDENT DETAILS",42,635,10,true,gray);text(receipt.studentName,42,610,15,true);text(`Admission number: ${receipt.admission}`,42,589,10);text(`Class: ${receipt.className}-${receipt.section}`,320,589,10);text("PAYMENT SUMMARY",42,545,10,true,gray);const rows=[["Total fee",receipt.previouslyPaid+receipt.amount+receipt.remainingBalance],["Previously paid",receipt.previouslyPaid],["Current payment",receipt.amount],["Total paid",receipt.totalPaid],["Remaining balance",receipt.remainingBalance]]as const;rows.forEach(([label,value],i)=>{const y=515-i*31;if(i===2)page.drawRectangle({x:35,y:y-10,width:525,height:28,color:rgb(.93,.98,.96)});text(label,50,y,11,i===2);text(`Rs. ${Number(value).toLocaleString("en-IN")}`,410,y,11,true);});page.drawLine({start:{x:42,y:350},end:{x:553,y:350},thickness:1,color:rgb(.86,.88,.9)});text(`Payment method: ${receipt.method}`,42,322,10);text(`Transaction ID: ${receipt.transactionId||"Not applicable"}`,42,300,10);text(`Payment status: ${receipt.status}`,42,278,10,true,green);text("Authorized Signature",410,170,10,true);page.drawLine({start:{x:390,y:185},end:{x:545,y:185},thickness:1,color:gray});text("Thank you for your payment.",42,92,11,true,green);text("This receipt was generated from the verified school fee ledger.",42,73,9,false,gray);const bytes=await doc.save();return new Response(Buffer.from(bytes),{headers:{"Content-Type":"application/pdf","Content-Disposition":`attachment; filename="${receipt.receiptNumber}.pdf"`,"Cache-Control":"private, no-store"}});}
+import { NextResponse } from "next/server";
+import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
+import { currentUser } from "@/lib/session";
+import { getInstitution, getReceipt } from "@/lib/db";
+export const runtime = "nodejs";
+export async function GET(
+  _: Request,
+  { params }: { params: Promise<{ receipt: string }> },
+) {
+  const user = await currentUser();
+  if (!user)
+    return NextResponse.json({ error: "Unauthenticated" }, { status: 401 });
+  const receipt = await getReceipt(
+    user.institutionId,
+    decodeURIComponent((await params).receipt),
+  );
+  if (!receipt)
+    return NextResponse.json({ error: "Receipt not found" }, { status: 404 });
+  const school = await getInstitution(user.institutionId),
+    doc = await PDFDocument.create(),
+    page = doc.addPage([595, 842]),
+    font = await doc.embedFont(StandardFonts.Helvetica),
+    bold = await doc.embedFont(StandardFonts.HelveticaBold),
+    green = rgb(0.06, 0.55, 0.42),
+    dark = rgb(0.08, 0.12, 0.2),
+    gray = rgb(0.38, 0.43, 0.5);
+  const text = (
+    value: string,
+    x: number,
+    y: number,
+    size = 10,
+    isBold = false,
+    color = dark,
+  ) => page.drawText(value, { x, y, size, font: isBold ? bold : font, color });
+  page.drawRectangle({ x: 0, y: 770, width: 595, height: 72, color: dark });
+  text(school.name.toUpperCase(), 42, 808, 18, true, rgb(1, 1, 1));
+  text(
+    [school.address, school.phone, school.email].filter(Boolean).join(" | ") ||
+      "School Administration",
+    42,
+    788,
+    9,
+    false,
+    rgb(0.85, 0.88, 0.92),
+  );
+  text("FEE PAYMENT RECEIPT", 42, 730, 22, true, green);
+  text(`Receipt: ${receipt.receiptNumber}`, 42, 700, 11, true);
+  text(`Invoice: ${receipt.invoiceNumber}`, 320, 700, 11, true);
+  text(`Payment date: ${receipt.paymentDate}`, 42, 680, 10);
+  page.drawLine({
+    start: { x: 42, y: 660 },
+    end: { x: 553, y: 660 },
+    thickness: 1,
+    color: rgb(0.86, 0.88, 0.9),
+  });
+  text("STUDENT DETAILS", 42, 635, 10, true, gray);
+  text(receipt.studentName, 42, 610, 15, true);
+  text(`Admission number: ${receipt.admission}`, 42, 589, 10);
+  text(`Class: ${receipt.className}-${receipt.section}`, 320, 589, 10);
+  text("PAYMENT SUMMARY", 42, 545, 10, true, gray);
+  const rows = [
+    [
+      "Total fee",
+      receipt.previouslyPaid + receipt.amount + receipt.remainingBalance,
+    ],
+    ["Previously paid", receipt.previouslyPaid],
+    ["Current payment", receipt.amount],
+    ["Total paid", receipt.totalPaid],
+    ["Remaining balance", receipt.remainingBalance],
+  ] as const;
+  rows.forEach(([label, value], i) => {
+    const y = 515 - i * 31;
+    if (i === 2)
+      page.drawRectangle({
+        x: 35,
+        y: y - 10,
+        width: 525,
+        height: 28,
+        color: rgb(0.93, 0.98, 0.96),
+      });
+    text(label, 50, y, 11, i === 2);
+    text(`Rs. ${Number(value).toLocaleString("en-IN")}`, 410, y, 11, true);
+  });
+  page.drawLine({
+    start: { x: 42, y: 350 },
+    end: { x: 553, y: 350 },
+    thickness: 1,
+    color: rgb(0.86, 0.88, 0.9),
+  });
+  text(`Payment method: ${receipt.method}`, 42, 322, 10);
+  text(
+    `Transaction ID: ${receipt.transactionId || "Not applicable"}`,
+    42,
+    300,
+    10,
+  );
+  text(`Payment status: ${receipt.status}`, 42, 278, 10, true, green);
+  text("Authorized Signature", 410, 170, 10, true);
+  page.drawLine({
+    start: { x: 390, y: 185 },
+    end: { x: 545, y: 185 },
+    thickness: 1,
+    color: gray,
+  });
+  text("Thank you for your payment.", 42, 92, 11, true, green);
+  text(
+    "This receipt was generated from the verified school fee ledger.",
+    42,
+    73,
+    9,
+    false,
+    gray,
+  );
+  const bytes = await doc.save();
+  return new Response(Buffer.from(bytes), {
+    headers: {
+      "Content-Type": "application/pdf",
+      "Content-Disposition": `attachment; filename="${receipt.receiptNumber}.pdf"`,
+      "Cache-Control": "private, no-store",
+    },
+  });
+}

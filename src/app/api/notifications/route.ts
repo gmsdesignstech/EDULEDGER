@@ -1,1 +1,19 @@
-import{NextResponse}from"next/server";import{currentUser}from"@/lib/session";import{listNotifications,markNotificationsRead}from"@/lib/db";export const runtime="nodejs";export async function GET(){const user=await currentUser();return user?NextResponse.json({notifications:listNotifications(user.institutionId,user.id)}):NextResponse.json({error:"Unauthenticated"},{status:401});}export async function POST(){const user=await currentUser();if(!user)return NextResponse.json({error:"Unauthenticated"},{status:401});markNotificationsRead(user.institutionId,user.id);return NextResponse.json({ok:true});}
+import { NextResponse } from "next/server";
+import { currentUser } from "@/lib/session";
+import { listNotifications, markNotificationsRead } from "@/lib/db";
+export const runtime = "nodejs";
+export async function GET() {
+  const user = await currentUser();
+  return user
+    ? NextResponse.json({
+        notifications: await listNotifications(user.institutionId, user.id),
+      })
+    : NextResponse.json({ error: "Unauthenticated" }, { status: 401 });
+}
+export async function POST() {
+  const user = await currentUser();
+  if (!user)
+    return NextResponse.json({ error: "Unauthenticated" }, { status: 401 });
+  await markNotificationsRead(user.institutionId, user.id);
+  return NextResponse.json({ ok: true });
+}

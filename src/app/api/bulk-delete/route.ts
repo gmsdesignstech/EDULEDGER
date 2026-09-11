@@ -1,1 +1,45 @@
-import{NextResponse}from"next/server";import{z}from"zod";import{deleteAllRecords}from"@/lib/db";import{currentUser}from"@/lib/session";export const runtime="nodejs";const schema=z.object({type:z.enum(["students","teachers","classes","attendance","fees","payments","reports","assignments","messages"]),confirmation:z.literal("DELETE ALL")});export async function DELETE(request:Request){const user=await currentUser();if(!user)return NextResponse.json({error:"Unauthenticated"},{status:401});if(!["SCHOOL_ADMIN","SUPER_ADMIN"].includes(user.role))return NextResponse.json({error:"Only school administrators can delete all records."},{status:403});const parsed=schema.safeParse(await request.json().catch(()=>null));if(!parsed.success)return NextResponse.json({error:"Invalid deletion confirmation."},{status:400});try{return NextResponse.json({deleted:deleteAllRecords(user.institutionId,parsed.data.type,user.id)});}catch{return NextResponse.json({error:"Could not delete these records."},{status:500});}}
+import { NextResponse } from "next/server";
+import { z } from "zod";
+import { deleteAllRecords } from "@/lib/db";
+import { currentUser } from "@/lib/session";
+export const runtime = "nodejs";
+const schema = z.object({
+  type: z.enum([
+    "students",
+    "teachers",
+    "classes",
+    "attendance",
+    "fees",
+    "payments",
+    "reports",
+    "assignments",
+    "messages",
+  ]),
+  confirmation: z.literal("DELETE ALL"),
+});
+export async function DELETE(request: Request) {
+  const user = await currentUser();
+  if (!user)
+    return NextResponse.json({ error: "Unauthenticated" }, { status: 401 });
+  if (!["SCHOOL_ADMIN", "SUPER_ADMIN"].includes(user.role))
+    return NextResponse.json(
+      { error: "Only school administrators can delete all records." },
+      { status: 403 },
+    );
+  const parsed = schema.safeParse(await request.json().catch(() => null));
+  if (!parsed.success)
+    return NextResponse.json(
+      { error: "Invalid deletion confirmation." },
+      { status: 400 },
+    );
+  try {
+    return NextResponse.json({
+      deleted: await deleteAllRecords(user.institutionId, parsed.data.type, user.id),
+    });
+  } catch {
+    return NextResponse.json(
+      { error: "Could not delete these records." },
+      { status: 500 },
+    );
+  }
+}

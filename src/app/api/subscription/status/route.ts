@@ -1,1 +1,14 @@
-import{NextResponse}from"next/server";import{currentUser}from"@/lib/session";import{getSubscription}from"@/lib/db";import{SUBSCRIPTION_PLANS}from"@/lib/subscription-plans";export const runtime="nodejs";export async function GET(){const user=await currentUser();return user?NextResponse.json({subscription:getSubscription(user.institutionId),plans:SUBSCRIPTION_PLANS}):NextResponse.json({error:"Unauthenticated"},{status:401});}
+import { NextResponse } from "next/server";
+import { currentUser } from "@/lib/session";
+import { getSubscription } from "@/lib/db";
+import { SUBSCRIPTION_PLANS } from "@/lib/subscription-plans";
+export const runtime = "nodejs";
+export async function GET() {
+  const user = await currentUser();
+  return user
+    ? NextResponse.json({
+        subscription: await getSubscription(user.institutionId),
+        plans: SUBSCRIPTION_PLANS,
+      })
+    : NextResponse.json({ error: "Unauthenticated" }, { status: 401 });
+}
