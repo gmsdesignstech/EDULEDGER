@@ -59,3 +59,4 @@ Razorpay configuration uses `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, and `RAZOR
 ## Architecture notes
 
 The database layer is tenant-aware through `institutionId`, includes indexed operational tables, and uses transactions for account creation, admissions, payments, attendance and subscription activation. Health, sitemap, robots, security headers and reduced-motion behavior are included.
+"# EDULEDGER01" 
