@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { databaseHealth } from "@/lib/db";
+import { logServerError } from "@/lib/server-errors";
 
 export const runtime = "nodejs";
 
@@ -13,7 +14,7 @@ export async function GET() {
       timestamp: new Date().toISOString(),
     });
   } catch (error) {
-    console.error("Health check failed", error);
+    logServerError("health.database", error);
     return NextResponse.json(
       {
         status: "unavailable",

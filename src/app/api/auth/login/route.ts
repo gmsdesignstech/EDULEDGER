@@ -4,6 +4,7 @@ import { compare } from "bcryptjs";
 import { z } from "zod";
 import { createSession, findUserByEmail } from "@/lib/db";
 import { SESSION_COOKIE } from "@/lib/session";
+import { logServerError } from "@/lib/server-errors";
 export const runtime = "nodejs";
 const schema = z.object({
   email: z.string().trim().toLowerCase().email(),
@@ -17,28 +18,28 @@ export async function POST(request: Request) {
       { status: 400 },
     );
   try {
-  const user = await findUserByEmail(parsed.data.email);
-  if (!user || !(await compare(parsed.data.password, user.passwordHash)))
-    return NextResponse.json(
-      { error: "Email or password is incorrect." },
-      { status: 401 },
-    );
-  const session = await createSession(user.id);
-  (await cookies()).set(SESSION_COOKIE, session.token, {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
-    path: "/",
-    expires: session.expires,
-  });
-  return NextResponse.json({
-    user: { name: user.name, email: user.email, role: user.role },
-  });
+    const user = await findUserByEmail(parsed.data.email);
+    if (!user || !(await compare(parsed.data.password, user.passwordHash)))
+      return NextResponse.json(
+        { error: "Email or password is incorrect." },
+        { status: 401 },
+      );
+    const session = await createSession(user.id);
+    (await cookies()).set(SESSION_COOKIE, session.token, {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+      path: "/",
+      expires: session.expires,
+    });
+    return NextResponse.json({
+      user: { name: user.name, email: user.email, role: user.role },
+    });
   } catch (error) {
-    console.error("Login failed", error);
+    logServerError("auth.login", error);
     return NextResponse.json(
       { error: "The sign-in service is temporarily unavailable. Please try again." },
-      { status: 503 },
+      { status: 500 },
     );
   }
 }

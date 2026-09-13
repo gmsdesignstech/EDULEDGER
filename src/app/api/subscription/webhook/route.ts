@@ -7,7 +7,7 @@ import {
 } from "@/lib/db";
 import { verifyWebhookSignature } from "@/lib/subscription";
 export const runtime = "nodejs";
-type RazorpayEntity = { id?: string; order_id?: string; status?: string };
+type RazorpayEntity = { id?: string; order_id?: string; status?: string; amount?:number; currency?:string; captured?:boolean };
 type Payload = {
   event?: string;
   created_at?: number;
@@ -48,16 +48,21 @@ export async function POST(request: Request) {
   const eventId =
     request.headers.get("x-razorpay-event-id") ||
     `${event.event}:${paymentId || orderId}:${event.created_at || 0}`;
-  if (!(await recordWebhookEvent(eventId, event.event)))
-    return NextResponse.json({ received: true, duplicate: true });
   const order = await findSubscriptionByOrder(orderId);
   if (!order) return NextResponse.json({ received: true, ignored: true });
   if (
     (event.event === "payment.captured" || event.event === "order.paid") &&
     paymentId
-  )
+  ) {
+    if(payment?.amount!==Math.round(order.amountPaid*100)||payment.currency!=="INR"||(event.event==="payment.captured"&&payment.status!=="captured"))
+      return NextResponse.json({error:"Payment details do not match the subscription order."},{status:409});
+    if (!(await recordWebhookEvent(eventId, event.event)))
+      return NextResponse.json({ received: true, duplicate: true });
     await activateVerifiedSubscription(orderId, paymentId, `webhook:${signature}`);
-  else if (event.event === "payment.failed")
+  } else if (event.event === "payment.failed") {
+    if (!(await recordWebhookEvent(eventId, event.event)))
+      return NextResponse.json({ received: true, duplicate: true });
     await failSubscription(orderId, "FAILED");
+  }
   return NextResponse.json({ received: true });
 }

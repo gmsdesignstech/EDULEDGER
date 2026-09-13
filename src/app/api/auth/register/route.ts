@@ -4,6 +4,7 @@ import { hash } from "bcryptjs";
 import { z } from "zod";
 import { createAccount, createSession, findUserByEmail } from "@/lib/db";
 import { SESSION_COOKIE } from "@/lib/session";
+import { isUniqueConstraintError, logServerError } from "@/lib/server-errors";
 export const runtime = "nodejs";
 const schema = z.object({
   name: z.string().trim().min(2).max(100),
@@ -41,10 +42,15 @@ export async function POST(request: Request) {
       { status: 201 },
     );
   } catch (error) {
-    console.error("Registration failed", error);
+    if (isUniqueConstraintError(error, "email"))
+      return NextResponse.json(
+        { error: "An account with this email already exists." },
+        { status: 409 },
+      );
+    logServerError("auth.register", error);
     return NextResponse.json(
       { error: "The registration service is temporarily unavailable. Please try again." },
-      { status: 503 },
+      { status: 500 },
     );
   }
 }

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { getInstitution, listClasses, saveClass } from "@/lib/db";
+import { addClassSection, getInstitution, listClassSummaries } from "@/lib/db";
 import { currentUser } from "@/lib/session";
 export const runtime = "nodejs";
 const schema = z.object({
@@ -17,7 +17,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Unauthenticated" }, { status: 401 });
   const year = new URL(request.url).searchParams.get("year") || undefined;
   return NextResponse.json({
-    classes: await listClasses(user.institutionId, year),
+    classes: await listClassSummaries(user.institutionId, year),
     academicYear: (await getInstitution(user.institutionId)).academicYear,
   });
 }
@@ -25,6 +25,8 @@ export async function POST(request: Request) {
   const user = await currentUser();
   if (!user)
     return NextResponse.json({ error: "Unauthenticated" }, { status: 401 });
+  if (!["SCHOOL_ADMIN", "SUPER_ADMIN"].includes(user.role))
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const parsed = schema.safeParse(await request.json().catch(() => null));
   if (!parsed.success)
     return NextResponse.json(
@@ -33,7 +35,7 @@ export async function POST(request: Request) {
     );
   try {
     return NextResponse.json(
-      { class: await saveClass(user.institutionId, parsed.data, user.id) },
+      { class: await addClassSection(user.institutionId, parsed.data.name, parsed.data.academicYear, parsed.data.section, parsed.data.teacher, parsed.data.capacity, user.id) },
       { status: 201 },
     );
   } catch {

@@ -5,11 +5,10 @@ EduLedger is a production-oriented, multi-role school operations platform built 
 ## Run locally
 
 1. Install dependencies: `npm install`
-2. Copy `.env.example` to `.env.local` and set `DATABASE_URL` to a PostgreSQL connection string.
-3. Start the app: `npm run dev`.
-4. Register a school account at `/register`, then sign in at `/login`.
+2. Start the app: `npm run dev`.
+3. Register a school account at `/register`, then sign in at `/login`.
 
-The PostgreSQL schema and subscription plans are created idempotently on the first database request. Passwords are bcrypt-hashed, and sessions use random server-side tokens in secure HTTP-only cookies.
+Development uses the existing local SQLite database when no PostgreSQL connection string is configured. To use PostgreSQL locally, copy `.env.example` to `.env.local` and set `DATABASE_URL`. The schema and subscription plans are created idempotently on the first database request. Passwords are bcrypt-hashed, and sessions use random server-side tokens in secure HTTP-only cookies.
 
 The dashboard is protected on the server. Unauthenticated requests are redirected to `/login`; student reads and writes are scoped to the institution attached to the authenticated session.
 
@@ -35,8 +34,8 @@ Razorpay configuration uses `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, and `RAZOR
 
 ## Production setup
 
-- In Vercel, open **Storage**, create or connect a managed PostgreSQL database, and connect it to this project. The app accepts either `DATABASE_URL` or Vercel's `POSTGRES_URL`.
-- Add the remaining variables from `.env.example` in Vercel. Set `NEXT_PUBLIC_APP_URL` to the production HTTPS origin and never expose provider secrets as `NEXT_PUBLIC_*` values.
+- In Vercel, open **Storage**, create or connect a managed PostgreSQL database, and connect it to this project. Authentication and every dashboard feature require either `DATABASE_URL` or Vercel's `POSTGRES_URL` in the Production environment. A local or SQLite fallback is intentionally not used in production.
+- Set `NEXT_PUBLIC_APP_URL` to the production HTTPS origin. Razorpay variables are required only for subscription/payment processing; the other provider variables in `.env.example` are optional until those integrations are enabled. Never expose provider secrets as `NEXT_PUBLIC_*` values.
 - Redeploy after changing environment variables. The application creates its tables and indexes automatically on the first request.
 - Configure Google OAuth with the deployed origin and callback URL used by your auth provider.
 - Configure Razorpay to call an HTTPS webhook endpoint. Verify `X-Razorpay-Signature` against the raw request body and update Payment + Subscription in one database transaction. The included verification endpoint demonstrates constant-time checkout signature validation; it deliberately does not unlock plans without persistence.

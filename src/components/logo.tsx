@@ -1,2 +1,28 @@
-import Link from "next/link";import{BookOpenCheck}from"lucide-react";import{cn}from"@/lib/utils";
-export function Logo({className}:{className?:string}){return <Link href="/" className={cn("flex items-center gap-2 font-black tracking-tight",className)}><span className="grid size-9 place-items-center rounded-xl bg-brand text-white"><BookOpenCheck className="size-5"/></span><span>EDU<span className="text-brand">LEDGER</span></span></Link>}
+import Link from "next/link";
+import { cn } from "@/lib/utils";
+
+export function Logo({ className }: { className?: string }) {
+  return (
+    <Link
+      href="/"
+      aria-label="EduLedger home"
+      className={cn(
+        "flex items-center gap-2.5 font-black tracking-tight",
+        className,
+      )}
+    >
+      <span
+        aria-hidden="true"
+        className="size-10 shrink-0 rounded-xl border border-slate-200 bg-white bg-no-repeat shadow-sm"
+        style={{
+          backgroundImage: "url('/eduledger-logo.jpeg')",
+          backgroundPosition: "center 36%",
+          backgroundSize: "200%",
+        }}
+      />
+      <span>
+        EDU<span className="text-brand">LEDGER</span>
+      </span>
+    </Link>
+  );
+}

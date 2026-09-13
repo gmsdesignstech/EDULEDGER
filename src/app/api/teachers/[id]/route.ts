@@ -22,6 +22,8 @@ export async function PUT(
   const user = await currentUser();
   if (!user)
     return NextResponse.json({ error: "Unauthenticated" }, { status: 401 });
+  if (!["SCHOOL_ADMIN", "SUPER_ADMIN"].includes(user.role))
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const parsed = teacherSchema.safeParse(
     await request.json().catch(() => null),
   );
@@ -47,6 +49,8 @@ export async function DELETE(
   const user = await currentUser();
   if (!user)
     return NextResponse.json({ error: "Unauthenticated" }, { status: 401 });
+  if (!["SCHOOL_ADMIN", "SUPER_ADMIN"].includes(user.role))
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   return (await deleteTeacher(user.institutionId, (await params).id, user.id))
     ? new NextResponse(null, { status: 204 })
     : NextResponse.json({ error: "Teacher not found" }, { status: 404 });

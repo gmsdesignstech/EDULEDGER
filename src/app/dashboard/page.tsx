@@ -9,7 +9,7 @@ import {
   Users,
   WalletCards,
 } from "lucide-react";
-import { dashboardData } from "@/lib/db";
+import { dashboardData, listClassSummaries } from "@/lib/db";
 import { requireUser } from "@/lib/session";
 export const runtime = "nodejs";
 const money = (n: number) =>
@@ -20,7 +20,7 @@ const money = (n: number) =>
   }).format(n);
 export default async function Dashboard() {
   const user = await requireUser(),
-    data = await dashboardData(user.institutionId),
+    [data, classSummaries] = await Promise.all([dashboardData(user.institutionId), listClassSummaries(user.institutionId)]),
     firstName = user.name.split(" ")[0],
     today = new Intl.DateTimeFormat("en-IN", {
       weekday: "long",
@@ -83,6 +83,10 @@ export default async function Dashboard() {
           <p className="text-sm text-muted">Total transactions</p>
           <b className="mt-2 block text-2xl">{data.collections.transactions}</b>
         </div>
+      </section>
+      <section className="card mt-5 overflow-hidden">
+        <div className="flex items-center justify-between border-b p-5"><div><h2 className="text-lg font-bold">Classes overview</h2><p className="text-sm text-muted">Live class strength and sections</p></div><Link href="/dashboard/classes" className="text-sm font-bold text-brand">Manage classes</Link></div>
+        <div className="grid gap-px bg-line sm:grid-cols-2 xl:grid-cols-3">{classSummaries.map(item=><div className="flex items-center justify-between bg-panel p-4" key={item.slug}><div><b>{item.name}</b><p className="text-xs text-muted">{item.studentCount} students · {item.sectionCount} sections</p></div><Link href={`/dashboard/classes/${item.slug}`} className="btn-secondary !px-3 !py-2">View class</Link></div>)}</div>
       </section>
       <div className="mt-5 grid gap-5 xl:grid-cols-[1.55fr_1fr]">
         <article className="card p-6">

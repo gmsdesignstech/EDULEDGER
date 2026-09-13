@@ -11,6 +11,7 @@ import {
   explainCapacityError,
   subscriptionAccessError,
 } from "@/lib/subscription-access";
+import { isUniqueConstraintError, logServerError } from "@/lib/server-errors";
 export const runtime = "nodejs";
 const studentInputSchema = z.object({
   name: z.string().trim().min(2).max(100),
@@ -73,12 +74,18 @@ export async function POST(request: Request) {
       { status: 201 },
     );
   } catch (error) {
-    const capacity = explainCapacityError(error),
-      message =
-        capacity ||
-        (error instanceof Error && error.message.includes("UNIQUE")
-          ? "That admission number already exists."
-          : "Could not save the student.");
-    return NextResponse.json({ error: message }, { status: 409 });
+    const capacity = explainCapacityError(error);
+    if (capacity)
+      return NextResponse.json({ error: capacity }, { status: 409 });
+    if (isUniqueConstraintError(error))
+      return NextResponse.json(
+        { error: "That admission number already exists." },
+        { status: 409 },
+      );
+    logServerError("students.create", error);
+    return NextResponse.json(
+      { error: "Could not save the student. Please try again." },
+      { status: 500 },
+    );
   }
 }

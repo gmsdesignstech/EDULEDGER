@@ -1,5 +1,5 @@
 import { Shell } from "@/components/dashboard";
-import { getSubscription } from "@/lib/db";
+import { getInstitution, getSubscription } from "@/lib/db";
 import { requireUser } from "@/lib/session";
 export const runtime = "nodejs";
 export default async function Layout({
@@ -8,10 +8,11 @@ export default async function Layout({
   children: React.ReactNode;
 }) {
   const user = await requireUser(),
-    subscription = await getSubscription(user.institutionId);
+    [subscription,institution] = await Promise.all([getSubscription(user.institutionId),getInstitution(user.institutionId)]);
   return (
     <Shell
       user={{ name: user.name, role: user.role }}
+      schoolName={institution.name}
       subscription={subscription}
     >
       {children}

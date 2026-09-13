@@ -1,0 +1,4 @@
+"use client";
+export default function GlobalError({error,retry}:{error:Error&{digest?:string};retry:()=>void}){
+ return <html lang="en"><body style={{margin:0,fontFamily:"system-ui, sans-serif",background:"#f8faff",color:"#111827"}}><main style={{minHeight:"100vh",display:"grid",placeItems:"center",padding:24}}><section style={{maxWidth:480,padding:32,border:"1px solid #dbe2ea",borderRadius:18,background:"white",textAlign:"center"}}><h1>EduLedger is temporarily unavailable</h1><p>Please try again. Your submitted data was not modified by this display error.</p>{error.digest&&<small>Reference: {error.digest}</small>}<div><button onClick={()=>retry()} style={{marginTop:20,padding:"10px 18px",border:0,borderRadius:10,background:"#6d28d9",color:"white",fontWeight:700}}>Try again</button></div></section></main></body></html>;
+}

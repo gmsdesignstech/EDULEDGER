@@ -1,4 +1,4 @@
 import type { Metadata,Viewport } from "next";import "./globals.css";import {ThemeProvider} from "@/components/theme";
 export const metadata:Metadata={title:{default:"EduLedger — Manage Better. Educate Smarter.",template:"%s | EduLedger"},description:"One intelligent operating system for modern educational institutions.",openGraph:{title:"EduLedger",description:"Manage Better. Educate Smarter.",type:"website"},twitter:{card:"summary_large_image"}};
 export const viewport:Viewport={width:"device-width",initialScale:1,viewportFit:"cover",themeColor:[{media:"(prefers-color-scheme: light)",color:"#f8faff"},{media:"(prefers-color-scheme: dark)",color:"#07111f"}]};
-export default function RootLayout({children}:{children:React.ReactNode}){return <html lang="en" suppressHydrationWarning><body><ThemeProvider>{children}</ThemeProvider></body></html>}
+export default function RootLayout({children}:{children:React.ReactNode}){return <html lang="en" data-scroll-behavior="smooth" suppressHydrationWarning><body><ThemeProvider>{children}</ThemeProvider></body></html>}

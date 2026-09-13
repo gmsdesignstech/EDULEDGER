@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { currentUser } from "@/lib/session";
 import { getPlan } from "@/lib/subscription-plans";
-import { createRazorpayOrder } from "@/lib/payment";
+import { createRazorpayOrder, PaymentServiceError, paymentErrorMessage } from "@/lib/payment";
 import { createPendingSubscription } from "@/lib/db";
 export const runtime = "nodejs";
 const schema = z.object({ planId: z.string().min(1).max(30) });
@@ -31,12 +31,10 @@ export async function POST(request: Request) {
     await createPendingSubscription(user.institutionId, plan.id, order.id);
     return NextResponse.json({ ...order, planName: plan.name });
   } catch (error) {
+    console.error("Subscription order creation failed",error instanceof Error?{name:error.name,message:error.message}:error);
     return NextResponse.json(
-      {
-        error:
-          error instanceof Error ? error.message : "Could not start checkout.",
-      },
-      { status: 503 },
+      {error:paymentErrorMessage(error),code:error instanceof PaymentServiceError?error.code:"ORDER_CREATION_FAILED"},
+      { status:error instanceof PaymentServiceError?error.status:503 },
     );
   }
 }

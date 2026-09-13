@@ -1,0 +1,10 @@
+"use client";
+import { useEffect,useState } from "react";
+import { Download,FileText,Printer } from "lucide-react";
+const reports=[["Income Report","income"],["Expense Report","expense"],["Fee Collection Report","fees"],["Salary Expense Report","salary"],["Monthly Profit/Loss Report","monthly-profit-loss"],["Cash Book Report","cash-book"],["Academic Year Financial Report","academic-year"]];
+
+export function AccountsReports(){
+ const[year,setYear]=useState("2026-2027");
+ useEffect(()=>{fetch("/api/settings").then(r=>r.json()).then(j=>j.settings?.academicYear&&setYear(j.settings.academicYear))},[]);
+ return <div className="mx-auto max-w-6xl"><div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end"><div><p className="label">Accounts</p><h1 className="mt-2 text-3xl font-black">Financial Reports</h1><p className="mt-1 text-muted">Export and print live accounting records for the selected academic year.</p></div><label className="text-sm font-bold">Academic year<input value={year} onChange={e=>setYear(e.target.value)} className="mt-1 block rounded-xl border bg-panel px-4 py-3"/></label></div><section className="mt-7 grid gap-4 md:grid-cols-2 xl:grid-cols-3">{reports.map(([label,report])=>{const spreadsheetBase=report==="fees"?`/api/export?type=fees&year=${encodeURIComponent(year)}`:`/api/accounts/export?report=${report}&year=${encodeURIComponent(year)}`,pdfBase=`/api/accounts/export?report=${report}&year=${encodeURIComponent(year)}&format=pdf`;return <article className="card p-5" key={report}><h2 className="font-bold">{label}</h2><p className="mt-1 text-sm text-muted">Database-backed · {year}</p><div className="mt-5 flex flex-wrap gap-2"><a className="btn-secondary" href={pdfBase} target="_blank" rel="noreferrer"><FileText className="size-4"/>PDF</a><a className="btn-secondary" href={`${spreadsheetBase}&format=csv`}><Download className="size-4"/>CSV</a><a className="btn-primary" href={`${spreadsheetBase}&format=xlsx`}><Download className="size-4"/>Excel</a></div></article>})}</section><button onClick={()=>print()} className="btn-secondary mt-5"><Printer className="size-4"/>Print report index</button></div>;
+}

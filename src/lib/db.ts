@@ -1,5 +1,8 @@
 import "server-only";
 import postgres from "postgres";
+import { DatabaseSync } from "node:sqlite";
+import { mkdirSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { SUBSCRIPTION_PLANS, getPlan } from "./subscription-plans";
 import {
@@ -71,7 +74,13 @@ export type DbPayment = {
   admission: string;
   className: string;
   section: string;
+  rollNumber: string;
+  parent: string;
   invoiceNumber: string;
+  feeType: string;
+  academicYear: string;
+  discount: number;
+  finalAmount: number;
   receiptNumber: string;
   amount: number;
   method: string;
@@ -116,23 +125,114 @@ export type SubscriptionSummary = {
 };
 export type ModuleRecord = { id: string; [key: string]: string };
 
-type Client = ReturnType<typeof postgres>;
-type Sql = any;
-let client: Client | undefined, initializing: Promise<void> | undefined;
+type QueryResult = Record<string, unknown>[] & { count?: number };
+type Sql = {
+  dialect: "postgres" | "sqlite";
+  unsafe(query: string, args?: unknown[]): Promise<QueryResult>;
+  begin<T>(callback: (sql: Sql) => Promise<T>): Promise<T>;
+};
+
+let client: Sql | undefined, initializing: Promise<void> | undefined;
+
+function sqliteQuery(query: string) {
+  return query
+    .replace(/\bILIKE\b/gi, "LIKE")
+    .replace(/::(?:text|int|jsonb)\b/gi, "")
+    .replace(/\s+FOR UPDATE\b/gi, "")
+    .replace(/\bCURRENT_DATE\b/gi, "date('now')");
+}
+
+function sqliteConnection(): Sql {
+  const path =
+    process.env.SQLITE_DATABASE_PATH ||
+    join(process.cwd(), "data", "eduledger.db");
+  mkdirSync(dirname(path), { recursive: true });
+  const database = new DatabaseSync(path);
+  database.exec(
+    "PRAGMA busy_timeout=30000; PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL;",
+  );
+
+  const adapter: Sql = {
+    dialect: "sqlite",
+    async unsafe(query, args = []) {
+      const sql = sqliteQuery(query);
+      const normalizedArgs = args.map((value) => {
+        if (value === undefined) return null;
+        if (value instanceof Date) return value.toISOString();
+        if (typeof value === "boolean") return Number(value);
+        if (typeof value === "bigint") return Number(value);
+        return value;
+      });
+      if (!args.length && sql.includes(";")) {
+        database.exec(sql);
+        return [] as QueryResult;
+      }
+      const statement = database.prepare(sql);
+      if (
+        /^\s*(?:SELECT|WITH|PRAGMA)\b/i.test(sql) ||
+        /\bRETURNING\b/i.test(sql)
+      )
+        return statement.all(...(normalizedArgs as never[])) as QueryResult;
+      const result = statement.run(...(normalizedArgs as never[]));
+      const rows = [] as QueryResult;
+      rows.count = Number(result.changes);
+      return rows;
+    },
+    async begin<T>(callback: (sql: Sql) => Promise<T>) {
+      database.exec("BEGIN IMMEDIATE");
+      try {
+        const result = await callback(adapter);
+        database.exec("COMMIT");
+        return result;
+      } catch (error) {
+        database.exec("ROLLBACK");
+        throw error;
+      }
+    },
+  };
+  return adapter;
+}
+
 function connection() {
   const url = process.env.DATABASE_URL || process.env.POSTGRES_URL;
-  if (!url)
-    throw new Error(
-      "DATABASE_URL is not configured. Connect a PostgreSQL database in Vercel.",
-    );
-  return (client ??= postgres(url, {
+  if (!url) {
+    if (process.env.NODE_ENV === "production" && !process.env.SQLITE_DATABASE_PATH)
+      throw new Error(
+        "DATABASE_URL is not configured. Connect a PostgreSQL database in production.",
+      );
+    return (client ??= sqliteConnection());
+  }
+  if (client) return client;
+  const sql = postgres(url, {
     max: 5,
     idle_timeout: 20,
     connect_timeout: 15,
     prepare: false,
-  }));
+  });
+  const adapter: Sql = {
+    dialect: "postgres",
+    unsafe: (query, args = []) =>
+      sql.unsafe(query, args as never[]) as unknown as Promise<QueryResult>,
+    async begin<T>(callback: (sql: Sql) => Promise<T>) {
+      const result = await sql.begin((transaction) => {
+        const transactionAdapter: Sql = {
+          dialect: "postgres",
+          unsafe: (query, args = []) =>
+            transaction.unsafe(query, args as never[]) as unknown as Promise<QueryResult>,
+          begin: async () => {
+            throw new Error("Nested database transactions are not supported");
+          },
+        };
+        return callback(transactionAdapter);
+      });
+      return result as unknown as T;
+    },
+  };
+  client = adapter;
+  return adapter;
 }
-function bind(query: string) {
+function bind(query: string, sql: Sql) {
+  if (sql.dialect === "sqlite") return sqliteQuery(query);
   let n = 0;
   return query.replace(/\?/g, () => `$${++n}`);
 }
@@ -141,7 +241,7 @@ async function rows<T extends Record<string, unknown>>(
   args: unknown[] = [],
   sql: Sql = connection(),
 ) {
-  return (await sql.unsafe(bind(query), args as any[])) as unknown as T[];
+  return (await sql.unsafe(bind(query, sql), args)) as unknown as T[];
 }
 async function row<T extends Record<string, unknown>>(
   query: string,
@@ -155,7 +255,7 @@ async function run(
   args: unknown[] = [],
   sql: Sql = connection(),
 ) {
-  return Number((await sql.unsafe(bind(query), args as any[])).count ?? 0);
+  return Number((await sql.unsafe(bind(query, sql), args)).count ?? 0);
 }
 
 async function initialize() {
@@ -183,12 +283,20 @@ CREATE TABLE IF NOT EXISTS subscription_plans(id TEXT PRIMARY KEY,name TEXT NOT 
 CREATE TABLE IF NOT EXISTS subscriptions(id TEXT PRIMARY KEY,institution_id TEXT NOT NULL REFERENCES institutions(id),plan_id TEXT NOT NULL REFERENCES subscription_plans(id),student_capacity INTEGER NOT NULL,amount_paid DOUBLE PRECISION NOT NULL DEFAULT 0,status TEXT NOT NULL,activation_date TIMESTAMPTZ,expiry_date TIMESTAMPTZ,razorpay_order_id TEXT NOT NULL UNIQUE,razorpay_payment_id TEXT UNIQUE,razorpay_signature TEXT,created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS subscription_payments(id TEXT PRIMARY KEY,institution_id TEXT NOT NULL REFERENCES institutions(id),plan TEXT NOT NULL,student_capacity INTEGER NOT NULL,amount DOUBLE PRECISION NOT NULL,razorpay_payment_id TEXT NOT NULL UNIQUE,payment_date TEXT NOT NULL,starts_at TIMESTAMPTZ NOT NULL,ends_at TIMESTAMPTZ NOT NULL,status TEXT NOT NULL,created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS razorpay_webhook_events(id TEXT PRIMARY KEY,event_type TEXT NOT NULL,created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS timetable_entries(id TEXT PRIMARY KEY,institution_id TEXT NOT NULL REFERENCES institutions(id),class_name TEXT NOT NULL,section TEXT NOT NULL,academic_year TEXT NOT NULL,subject TEXT NOT NULL,teacher_id TEXT REFERENCES teachers(id) ON DELETE SET NULL,weekday INTEGER NOT NULL CHECK(weekday BETWEEN 1 AND 6),start_time TEXT NOT NULL,end_time TEXT NOT NULL,created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,UNIQUE(institution_id,class_name,section,academic_year,weekday,start_time));
+CREATE TABLE IF NOT EXISTS class_exams(id TEXT PRIMARY KEY,institution_id TEXT NOT NULL REFERENCES institutions(id),class_name TEXT NOT NULL,section TEXT NOT NULL,academic_year TEXT NOT NULL,name TEXT NOT NULL,exam_date TEXT NOT NULL,subject TEXT NOT NULL,max_marks DOUBLE PRECISION NOT NULL,passing_marks DOUBLE PRECISION NOT NULL,created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS class_results(id TEXT PRIMARY KEY,institution_id TEXT NOT NULL REFERENCES institutions(id),exam_id TEXT NOT NULL REFERENCES class_exams(id) ON DELETE CASCADE,student_id TEXT NOT NULL REFERENCES students(id) ON DELETE CASCADE,marks DOUBLE PRECISION NOT NULL,grade TEXT NOT NULL,status TEXT NOT NULL,created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,UNIQUE(exam_id,student_id));
+CREATE TABLE IF NOT EXISTS account_transactions(id TEXT PRIMARY KEY,institution_id TEXT NOT NULL REFERENCES institutions(id),academic_year TEXT NOT NULL,transaction_type TEXT NOT NULL CHECK(transaction_type IN ('income','expense')),category TEXT NOT NULL,amount_paise INTEGER NOT NULL CHECK(amount_paise>0),transaction_date TEXT NOT NULL,description TEXT NOT NULL,payment_method TEXT NOT NULL,reference_number TEXT NOT NULL DEFAULT '',source_type TEXT NOT NULL DEFAULT 'cash_book',source_id TEXT,status TEXT NOT NULL DEFAULT 'Active' CHECK(status IN ('Active','Voided')),notes TEXT NOT NULL DEFAULT '',created_by TEXT NOT NULL REFERENCES users(id),created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP);
 CREATE INDEX IF NOT EXISTS idx_students_institution ON students(institution_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_module_records ON module_records(institution_id,module);
 CREATE INDEX IF NOT EXISTS idx_attendance_scope ON attendance(institution_id,date,status);
 CREATE INDEX IF NOT EXISTS idx_fees_scope ON fees(institution_id,status,due_date);
 CREATE INDEX IF NOT EXISTS idx_payments_scope ON payments(institution_id,payment_date,created_at);
+CREATE INDEX IF NOT EXISTS idx_timetable_class ON timetable_entries(institution_id,class_name,academic_year);
+CREATE INDEX IF NOT EXISTS idx_exams_class ON class_exams(institution_id,class_name,academic_year);
+CREATE INDEX IF NOT EXISTS idx_accounts_scope ON account_transactions(institution_id,academic_year,transaction_date,status);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_accounts_source ON account_transactions(institution_id,source_type,source_id) WHERE source_id IS NOT NULL;
 `);
     for (const p of SUBSCRIPTION_PLANS)
       await run(
@@ -284,7 +392,10 @@ async function nextNumber(
       [institutionId, kind, year],
       db,
     );
-  return `${kind}-${year}-${String(result.value).padStart(6, "0")}`;
+  // Invoice and receipt columns are globally unique, while counters are scoped
+  // to an institution. Include the institution ID so two schools can both use
+  // their first counter value without rolling back the student/payment write.
+  return `${kind}-${year}-${institutionId}-${String(result.value).padStart(6, "0")}`;
 }
 
 export async function getInstitution(institutionId: string) {
@@ -876,6 +987,7 @@ export async function listFees(
     className?: string;
     section?: string;
     status?: string;
+    academicYear?: string;
   } = {},
 ) {
   const db = await ready();
@@ -898,6 +1010,10 @@ export async function listFees(
       where.push(`${col}=?`);
       args.push(filters[k]);
     }
+  if (filters.academicYear) {
+    where.push("f.academic_year=?");
+    args.push(filters.academicYear);
+  }
   return await rows<Record<string, string | number>>(
     `SELECT f.id,f.student_id AS "studentId",s.name AS "studentName",s.admission,s.class_name AS "className",s.section,f.invoice_number AS "invoiceNumber",f.fee_type AS "feeType",f.academic_year AS "academicYear",f.total_amount AS "totalAmount",f.discount,f.final_amount AS "finalAmount",f.paid_amount AS "paidAmount",f.pending_amount AS "pendingAmount",f.due_date AS "dueDate",f.status FROM fees f JOIN students s ON s.id=f.student_id WHERE ${where.join(" AND ")} ORDER BY f.due_date,f.created_at DESC`,
     args,
@@ -962,7 +1078,7 @@ export async function createFee(
   return id;
 }
 
-const paymentSelect = `SELECT p.id,p.fee_id AS "feeId",p.student_id AS "studentId",s.name AS "studentName",s.admission,s.class_name AS "className",s.section,f.invoice_number AS "invoiceNumber",p.receipt_number AS "receiptNumber",p.amount,p.payment_method AS method,p.transaction_id AS "transactionId",p.payment_date AS "paymentDate",p.status,p.notes,(SELECT COALESCE(SUM(p2.amount),0) FROM payments p2 WHERE p2.fee_id=p.fee_id AND (p2.created_at,p2.id)<(p.created_at,p.id)) AS "previouslyPaid",(SELECT COALESCE(SUM(p2.amount),0) FROM payments p2 WHERE p2.fee_id=p.fee_id AND (p2.created_at,p2.id)<=(p.created_at,p.id)) AS "totalPaid",(f.final_amount-(SELECT COALESCE(SUM(p2.amount),0) FROM payments p2 WHERE p2.fee_id=p.fee_id AND (p2.created_at,p2.id)<=(p.created_at,p.id))) AS "remainingBalance",p.created_at::text AS "createdAt" FROM payments p JOIN students s ON s.id=p.student_id JOIN fees f ON f.id=p.fee_id`;
+const paymentSelect = `SELECT p.id,p.fee_id AS "feeId",p.student_id AS "studentId",s.name AS "studentName",s.admission,s.class_name AS "className",s.section,s.roll_number AS "rollNumber",s.parent,f.invoice_number AS "invoiceNumber",f.fee_type AS "feeType",f.academic_year AS "academicYear",f.discount,f.final_amount AS "finalAmount",p.receipt_number AS "receiptNumber",p.amount,p.payment_method AS method,p.transaction_id AS "transactionId",p.payment_date AS "paymentDate",p.status,p.notes,(SELECT COALESCE(SUM(p2.amount),0) FROM payments p2 WHERE p2.fee_id=p.fee_id AND (p2.created_at,p2.id)<(p.created_at,p.id)) AS "previouslyPaid",(SELECT COALESCE(SUM(p2.amount),0) FROM payments p2 WHERE p2.fee_id=p.fee_id AND (p2.created_at,p2.id)<=(p.created_at,p.id)) AS "totalPaid",(f.final_amount-(SELECT COALESCE(SUM(p2.amount),0) FROM payments p2 WHERE p2.fee_id=p.fee_id AND (p2.created_at,p2.id)<=(p.created_at,p.id))) AS "remainingBalance",p.created_at::text AS "createdAt" FROM payments p JOIN students s ON s.id=p.student_id JOIN fees f ON f.id=p.fee_id`;
 export async function getPayment(institutionId: string, id: string) {
   return await row<DbPayment>(
     `${paymentSelect} WHERE p.institution_id=? AND p.id=?`,
@@ -988,6 +1104,7 @@ export async function listPayments(
     from?: string;
     to?: string;
     studentId?: string;
+    academicYear?: string;
     limit?: number;
     offset?: number;
   } = {},
@@ -1019,6 +1136,10 @@ export async function listPayments(
   if (filters.to) {
     where.push("p.payment_date<=?");
     args.push(filters.to);
+  }
+  if (filters.academicYear) {
+    where.push("f.academic_year=?");
+    args.push(filters.academicYear);
   }
   let query = `${paymentSelect} WHERE ${where.join(" AND ")} ORDER BY p.payment_date DESC,p.created_at DESC`;
   if (filters.limit) {
@@ -1181,12 +1302,12 @@ export async function dashboardData(institutionId: string) {
       db,
     ),
     row<{ today: number; month: number; transactions: number }>(
-      "SELECT COALESCE(SUM(CASE WHEN payment_date=? THEN amount ELSE 0 END),0) today,COALESCE(SUM(CASE WHEN SUBSTRING(payment_date,1,7)=? THEN amount ELSE 0 END),0) month,COUNT(*)::int transactions FROM payments WHERE institution_id=? AND status='Success'",
+      'SELECT COALESCE(SUM(CASE WHEN payment_date=? THEN amount ELSE 0 END),0) today,COALESCE(SUM(CASE WHEN SUBSTRING(payment_date,1,7)=? THEN amount ELSE 0 END),0) AS "month",COUNT(*)::int transactions FROM payments WHERE institution_id=? AND status=\'Success\'',
       [today, month, institutionId],
       db,
     ),
     rows<{ month: string; amount: number }>(
-      "SELECT SUBSTRING(payment_date,1,7) month,SUM(amount) amount FROM payments WHERE institution_id=? AND status='Success' GROUP BY SUBSTRING(payment_date,1,7) ORDER BY month DESC LIMIT 12",
+      'SELECT SUBSTRING(payment_date,1,7) AS "month",SUM(amount) amount FROM payments WHERE institution_id=? AND status=\'Success\' GROUP BY SUBSTRING(payment_date,1,7) ORDER BY "month" DESC LIMIT 12',
       [institutionId],
       db,
     ),
@@ -1645,4 +1766,166 @@ export async function deleteAllRecords(
     );
   });
   return count;
+}
+
+export const STANDARD_CLASSES = [
+  { name: "LKG", slug: "lkg", description: "Lower Kindergarten", sections: 2 },
+  { name: "UKG", slug: "ukg", description: "Upper Kindergarten", sections: 2 },
+  ...Array.from({ length: 10 }, (_, index) => ({
+    name: `Class ${index + 1}`,
+    slug: `class-${index + 1}`,
+    description: index < 5 ? "Primary School" : "High School",
+    sections: 3,
+  })),
+] as const;
+
+export function classFromSlug(slug: string) {
+  return STANDARD_CLASSES.find((item) => item.slug === slug);
+}
+
+async function ensureStandardClasses(institutionId: string, academicYear: string) {
+  const db = await ready();
+  for (const item of STANDARD_CLASSES) {
+    for (let index = 0; index < item.sections; index++) {
+      await run(
+        "INSERT INTO classes(id,institution_id,name,section,teacher,academic_year,capacity,status)VALUES(?,?,?,?,?,?,40,'Active') ON CONFLICT(institution_id,name,section,academic_year) DO NOTHING",
+        [randomUUID(), institutionId, item.name, String.fromCharCode(65 + index), "", academicYear],
+        db,
+      );
+    }
+  }
+}
+
+export async function listClassSummaries(institutionId: string, academicYear?: string) {
+  const year = academicYear ?? (await getInstitution(institutionId)).academicYear;
+  await ensureStandardClasses(institutionId, year);
+  const [classes, students, teachers] = await Promise.all([
+    rows<{ name: string; section: string; teacher: string; status: string }>(
+      "SELECT name,section,teacher,status FROM classes WHERE institution_id=? AND academic_year=?",
+      [institutionId, year], await ready()),
+    rows<{ className: string; count: number }>(
+      'SELECT class_name AS "className",COUNT(*)::int count FROM students WHERE institution_id=? AND status=\'Active\' GROUP BY class_name',
+      [institutionId], await ready()),
+    listTeachers(institutionId),
+  ]);
+  return STANDARD_CLASSES.map((definition) => {
+    const sections = classes.filter((item) => item.name === definition.name);
+    const assigned = teachers.filter((teacher) => teacher.classes.split(",").some((value) => value.trim().startsWith(definition.name)));
+    return {
+      ...definition,
+      academicYear: year,
+      studentCount: students.find((item) => item.className === definition.name)?.count ?? 0,
+      teacherCount: assigned.length,
+      classTeacher: sections.find((item) => item.teacher)?.teacher || "Not Assigned",
+      sectionCount: sections.length,
+      status: sections.some((item) => item.status === "Active") ? "Active" : "Inactive",
+    };
+  });
+}
+
+export async function getClassWorkspace(institutionId: string, slug: string, academicYear?: string) {
+  const definition = classFromSlug(slug);
+  if (!definition) return null;
+  const year = academicYear ?? (await getInstitution(institutionId)).academicYear;
+  const summaries = await listClassSummaries(institutionId, year);
+  const summary = summaries.find((item) => item.slug === slug)!;
+  const [sections, students, teachers, attendance, fees, payments, timetable, exams, results] = await Promise.all([
+    rows('SELECT id,name,section,teacher,capacity,status FROM classes WHERE institution_id=? AND name=? AND academic_year=? ORDER BY section', [institutionId, definition.name, year], await ready()),
+    listStudents(institutionId, { className: definition.name, limit: 1000 }),
+    listTeachers(institutionId),
+    listAttendance(institutionId, { className: definition.name }),
+    listFees(institutionId, { className: definition.name }),
+    listPayments(institutionId, { className: definition.name }),
+    rows('SELECT t.id,t.section,t.subject,t.weekday,t.start_time AS "startTime",t.end_time AS "endTime",COALESCE(te.name,\'Unassigned\') AS "teacherName",t.teacher_id AS "teacherId" FROM timetable_entries t LEFT JOIN teachers te ON te.id=t.teacher_id WHERE t.institution_id=? AND t.class_name=? AND t.academic_year=? ORDER BY t.weekday,t.start_time', [institutionId, definition.name, year], await ready()),
+    rows('SELECT id,name,exam_date AS "examDate",section,subject,max_marks AS "maxMarks",passing_marks AS "passingMarks" FROM class_exams WHERE institution_id=? AND class_name=? AND academic_year=? ORDER BY exam_date DESC', [institutionId, definition.name, year], await ready()),
+    rows('SELECT r.id,r.exam_id AS "examId",r.student_id AS "studentId",s.name AS "studentName",e.subject,r.marks,r.grade,r.status FROM class_results r JOIN students s ON s.id=r.student_id JOIN class_exams e ON e.id=r.exam_id WHERE r.institution_id=? AND e.class_name=? AND e.academic_year=? ORDER BY e.exam_date DESC,s.name', [institutionId, definition.name, year], await ready()),
+  ]);
+  const today = new Date().toISOString().slice(0, 10);
+  const todayAttendance = (attendance as { date: string; status: string }[]).filter((item) => item.date.slice(0, 10) === today);
+  return { summary, sections, students, teachers, attendance, fees, payments, timetable, exams, results,
+    metrics: {
+      present: todayAttendance.filter((item) => item.status === "Present").length,
+      absent: todayAttendance.filter((item) => item.status === "Absent").length,
+      totalFees: (fees as { totalAmount: number }[]).reduce((sum, item) => sum + Number(item.totalAmount), 0),
+      paidFees: (fees as { paidAmount: number }[]).reduce((sum, item) => sum + Number(item.paidAmount), 0),
+      pendingFees: (fees as { pendingAmount: number }[]).reduce((sum, item) => sum + Number(item.pendingAmount), 0),
+    }
+  };
+}
+
+export async function addClassSection(institutionId: string, className: string, academicYear: string, section: string, teacher: string, capacity: number, userId: string) {
+  const definition = STANDARD_CLASSES.find((item) => item.name === className);
+  if (!definition) throw new Error("Invalid class");
+  const item = await saveClass(institutionId, { name: className, section, teacher, academicYear, capacity, status: "Active" }, userId);
+  return item;
+}
+
+export async function deleteClassSection(institutionId: string, id: string, userId: string) {
+  const db = await ready();
+  const item = await row<{ name: string; section: string }>('SELECT name,section FROM classes WHERE id=? AND institution_id=?', [id, institutionId], db);
+  if (!item) throw new Error("Section not found");
+  const active = await row<{ count: number }>('SELECT COUNT(*)::int count FROM students WHERE institution_id=? AND class_name=? AND section=? AND status=\'Active\'', [institutionId, item.name, item.section], db);
+  if (active.count) throw new Error("Section contains active students");
+  await run('DELETE FROM classes WHERE id=? AND institution_id=?', [id, institutionId], db);
+  await audit(institutionId, userId, "Section Deleted", "Class", id, item, db);
+}
+
+export async function addTimetableEntry(institutionId: string, className: string, academicYear: string, input: { section: string; subject: string; teacherId?: string; weekday: number; startTime: string; endTime: string }) {
+  const id = randomUUID();
+  await run('INSERT INTO timetable_entries(id,institution_id,class_name,section,academic_year,subject,teacher_id,weekday,start_time,end_time)VALUES(?,?,?,?,?,?,?,?,?,?)', [id,institutionId,className,input.section,academicYear,input.subject,input.teacherId || null,input.weekday,input.startTime,input.endTime], await ready());
+  return id;
+}
+
+export async function addClassExam(institutionId: string, className: string, academicYear: string, input: { name: string; examDate: string; section: string; subject: string; maxMarks: number; passingMarks: number }) {
+  const id = randomUUID();
+  await run('INSERT INTO class_exams(id,institution_id,class_name,section,academic_year,name,exam_date,subject,max_marks,passing_marks)VALUES(?,?,?,?,?,?,?,?,?,?)', [id,institutionId,className,input.section,academicYear,input.name,input.examDate,input.subject,input.maxMarks,input.passingMarks], await ready());
+  return id;
+}
+
+export async function addClassResult(institutionId: string, examId: string, studentId: string, marks: number) {
+  const exam = await row<{ maxMarks: number; passingMarks: number }>('SELECT max_marks AS "maxMarks",passing_marks AS "passingMarks" FROM class_exams WHERE id=? AND institution_id=?', [examId,institutionId], await ready());
+  if (!exam || marks < 0 || marks > exam.maxMarks) throw new Error("Invalid marks");
+  const percent = (marks / exam.maxMarks) * 100;
+  const grade = percent >= 90 ? "A+" : percent >= 80 ? "A" : percent >= 70 ? "B" : percent >= 60 ? "C" : percent >= 50 ? "D" : "F";
+  const id = randomUUID();
+  await run('INSERT INTO class_results(id,institution_id,exam_id,student_id,marks,grade,status)VALUES(?,?,?,?,?,?,?) ON CONFLICT(exam_id,student_id) DO UPDATE SET marks=EXCLUDED.marks,grade=EXCLUDED.grade,status=EXCLUDED.status', [id,institutionId,examId,studentId,marks,grade,marks >= exam.passingMarks ? "Pass" : "Fail"], await ready());
+  return id;
+}
+
+export type AccountTransactionInput={transactionType:"income"|"expense";category:string;amountPaise:number;transactionDate:string;description:string;paymentMethod:string;referenceNumber:string;notes:string;academicYear:string};
+const accountSelect='SELECT a.id,a.transaction_type AS "transactionType",a.category,a.amount_paise AS "amountPaise",a.transaction_date AS "transactionDate",a.description,a.payment_method AS "paymentMethod",a.reference_number AS "referenceNumber",a.source_type AS "sourceType",a.source_id AS "sourceId",a.status,a.notes,a.created_by AS "createdBy",u.name AS "createdByName",a.created_at::text AS "createdAt",a.updated_at::text AS "updatedAt" FROM account_transactions a JOIN users u ON u.id=a.created_by';
+
+export async function listAccountTransactions(institutionId:string,filters:{academicYear:string;search?:string;type?:string;category?:string;method?:string;from?:string;to?:string;limit?:number;offset?:number}){
+ const where=["a.institution_id=?","a.academic_year=?"],args:unknown[]=[institutionId,filters.academicYear];
+ if(filters.search){where.push("(a.description ILIKE ? OR a.reference_number ILIKE ? OR a.category ILIKE ?)");const q=`%${filters.search}%`;args.push(q,q,q)}
+ if(filters.type){where.push("a.transaction_type=?");args.push(filters.type)}if(filters.category){where.push("a.category=?");args.push(filters.category)}if(filters.method){where.push("a.payment_method=?");args.push(filters.method)}if(filters.from){where.push("a.transaction_date>=?");args.push(filters.from)}if(filters.to){where.push("a.transaction_date<=?");args.push(filters.to)}
+ const db=await ready(),total=(await row<{count:number}>(`SELECT COUNT(*)::int count FROM account_transactions a WHERE ${where.join(" AND ")}`,args,db)).count,limit=Math.min(filters.limit??25,10000),offset=Math.max(filters.offset??0,0);
+ const items=await rows(`${accountSelect} WHERE ${where.join(" AND ")} ORDER BY a.transaction_date DESC,a.created_at DESC LIMIT ? OFFSET ?`,[...args,limit,offset],db);
+ return{items,total,limit,offset};
+}
+
+export async function createAccountTransaction(institutionId:string,userId:string,input:AccountTransactionInput){
+ const id=randomUUID(),db=await ready();await run('INSERT INTO account_transactions(id,institution_id,academic_year,transaction_type,category,amount_paise,transaction_date,description,payment_method,reference_number,notes,created_by)VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',[id,institutionId,input.academicYear,input.transactionType,input.category,input.amountPaise,input.transactionDate,input.description,input.paymentMethod,input.referenceNumber,input.notes,userId],db);await audit(institutionId,userId,"Account Transaction Created","AccountTransaction",id,input,db);return await row(`${accountSelect} WHERE a.id=? AND a.institution_id=?`,[id,institutionId],db);
+}
+
+export async function updateAccountTransaction(institutionId:string,userId:string,id:string,input:AccountTransactionInput){
+ const db=await ready(),previous=await row<Record<string,unknown>>(`${accountSelect} WHERE a.id=? AND a.institution_id=?`,[id,institutionId],db);if(!previous)throw new Error("Transaction not found");if(previous.sourceType!=="cash_book")throw new Error("Imported ledger entries cannot be edited");if(previous.status==="Voided")throw new Error("Voided transactions cannot be edited");await run('UPDATE account_transactions SET academic_year=?,transaction_type=?,category=?,amount_paise=?,transaction_date=?,description=?,payment_method=?,reference_number=?,notes=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND institution_id=?',[input.academicYear,input.transactionType,input.category,input.amountPaise,input.transactionDate,input.description,input.paymentMethod,input.referenceNumber,input.notes,id,institutionId],db);await audit(institutionId,userId,"Account Transaction Updated","AccountTransaction",id,{previous,next:input},db);return await row(`${accountSelect} WHERE a.id=? AND a.institution_id=?`,[id,institutionId],db);
+}
+
+export async function voidAccountTransaction(institutionId:string,userId:string,id:string){
+ const db=await ready(),previous=await row<Record<string,unknown>>(`${accountSelect} WHERE a.id=? AND a.institution_id=?`,[id,institutionId],db);if(!previous)throw new Error("Transaction not found");if(previous.status==="Voided")return previous;await run("UPDATE account_transactions SET status='Voided',updated_at=CURRENT_TIMESTAMP WHERE id=? AND institution_id=?",[id,institutionId],db);await audit(institutionId,userId,"Account Transaction Voided","AccountTransaction",id,{previous},db);return{...previous,status:"Voided"};
+}
+
+function academicMonths(academicYear:string){const start=Number(academicYear.match(/\d{4}/)?.[0]||new Date().getFullYear());return Array.from({length:12},(_,i)=>{const date=new Date(Date.UTC(start,i+3,1));return{key:date.toISOString().slice(0,7),label:new Intl.DateTimeFormat("en-IN",{month:"short",year:"numeric",timeZone:"UTC"}).format(date)}})}
+export async function accountsSummary(institutionId:string,academicYear:string){
+ const db=await ready(),[fees,feePayments,ledger]=await Promise.all([
+  row<{total:number}>('SELECT COALESCE(SUM(final_amount),0) total FROM fees WHERE institution_id=? AND academic_year=?',[institutionId,academicYear],db),
+  row<{total:number}>('SELECT COALESCE(SUM(p.amount),0) total FROM payments p JOIN fees f ON f.id=p.fee_id WHERE p.institution_id=? AND f.academic_year=? AND p.status=\'Success\'',[institutionId,academicYear],db),
+  rows<{transactionType:string;category:string;amountPaise:number;transactionDate:string}>('SELECT transaction_type AS "transactionType",category,amount_paise AS "amountPaise",transaction_date AS "transactionDate" FROM account_transactions WHERE institution_id=? AND academic_year=? AND status=\'Active\'',[institutionId,academicYear],db)
+ ]);
+ const paise=(value:number)=>Math.round(Number(value||0)*100),feeExpected=paise(fees.total),feeCollections=paise(feePayments.total),active=ledger.map(x=>({...x,amountPaise:Number(x.amountPaise)}));
+ const salary=active.filter(x=>x.transactionType==="expense"&&x.category==="Staff Salaries").reduce((n,x)=>n+x.amountPaise,0),otherIncome=active.filter(x=>x.transactionType==="income"&&x.category==="Other Income").reduce((n,x)=>n+x.amountPaise,0),cashIncome=active.filter(x=>x.transactionType==="income"&&x.category!=="Other Income").reduce((n,x)=>n+x.amountPaise,0),otherExpenses=active.filter(x=>x.transactionType==="expense"&&x.category==="Other Expenses").reduce((n,x)=>n+x.amountPaise,0),cashExpenses=active.filter(x=>x.transactionType==="expense"&&!['Staff Salaries','Other Expenses'].includes(x.category)).reduce((n,x)=>n+x.amountPaise,0),totalIncome=feeCollections+cashIncome+otherIncome,totalExpenses=salary+cashExpenses+otherExpenses;
+ const monthly=academicMonths(academicYear).map(month=>{const entries=active.filter(x=>x.transactionDate.startsWith(month.key)),fee=0;return{...month,feeCollections:fee,staffSalaries:entries.filter(x=>x.transactionType==="expense"&&x.category==="Staff Salaries").reduce((n,x)=>n+x.amountPaise,0),otherIncome:entries.filter(x=>x.transactionType==="income").reduce((n,x)=>n+x.amountPaise,0),otherExpenses:entries.filter(x=>x.transactionType==="expense"&&x.category!=="Staff Salaries").reduce((n,x)=>n+x.amountPaise,0)}});
+ const paymentMonths=await rows<{month:string;amount:number}>('SELECT SUBSTRING(p.payment_date,1,7) AS "month",COALESCE(SUM(p.amount),0) amount FROM payments p JOIN fees f ON f.id=p.fee_id WHERE p.institution_id=? AND f.academic_year=? AND p.status=\'Success\' GROUP BY SUBSTRING(p.payment_date,1,7)',[institutionId,academicYear],db);for(const item of monthly){item.feeCollections=paise(paymentMonths.find(p=>p.month===item.key)?.amount||0)}
+ return{academicYear,feeExpected,totalCollected:feeCollections,totalExpenses,netProfitLoss:totalIncome-totalExpenses,totalIncome,totalExpenditure:totalExpenses,incomeStreams:{feeCollections,cashBookIncome:cashIncome,otherIncome,grandTotal:totalIncome},expenditureStreams:{staffSalaries:salary,cashBookExpenses:cashExpenses,otherExpenses,grandTotal:totalExpenses},monthly:monthly.map(x=>({...x,income:x.feeCollections+x.otherIncome,expenses:x.staffSalaries+x.otherExpenses,net:x.feeCollections+x.otherIncome-x.staffSalaries-x.otherExpenses}))};
 }

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { paymentSignatureSchema } from "@/lib/validation";
-import { getRazorpayPayment, verifyRazorpaySignature } from "@/lib/payment";
+import { getRazorpayPayment, paymentErrorMessage, verifyRazorpaySignature } from "@/lib/payment";
 import {
   activateVerifiedSubscription,
   findSubscriptionByOrder,
@@ -65,11 +65,9 @@ export async function POST(request: Request) {
       subscription: await activateVerifiedSubscription(o, p, s),
     });
   } catch (error) {
+    console.error("Subscription payment confirmation failed",error instanceof Error?{name:error.name,message:error.message}:error);
     return NextResponse.json(
-      {
-        error:
-          error instanceof Error ? error.message : "Could not confirm payment",
-      },
+      { error:paymentErrorMessage(error) },
       { status: 502 },
     );
   }
