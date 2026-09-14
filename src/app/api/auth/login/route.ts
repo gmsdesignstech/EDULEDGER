@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { compare } from "bcryptjs";
 import { z } from "zod";
-import { createSession, findUserByEmail } from "@/lib/db";
+import { createSession, findUserByEmail, recordUserLogin } from "@/lib/db";
 import { SESSION_COOKIE } from "@/lib/session";
 import { logServerError } from "@/lib/server-errors";
 export const runtime = "nodejs";
@@ -19,12 +19,13 @@ export async function POST(request: Request) {
     );
   try {
     const user = await findUserByEmail(parsed.data.email);
-    if (!user || !(await compare(parsed.data.password, user.passwordHash)))
+    if (!user || user.status!=="Active" || !(await compare(parsed.data.password, user.passwordHash)))
       return NextResponse.json(
         { error: "Email or password is incorrect." },
         { status: 401 },
       );
     const session = await createSession(user.id);
+    await recordUserLogin(user.id);
     (await cookies()).set(SESSION_COOKIE, session.token, {
       httpOnly: true,
       sameSite: "lax",

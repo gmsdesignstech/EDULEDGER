@@ -6,6 +6,7 @@ import {
   assertStudentCapacity,
   createFee,
   findStudentByAdmission,
+  getInstitution,
   listFees,
   logImport,
   markAttendance,
@@ -97,6 +98,7 @@ export async function POST(request: Request) {
   const { type, rows } = parsed.data,
     errors: { row: number; message: string }[] = [],
     valid: Row[] = [];
+  const defaultAcademicYear=(await getInstitution(user.institutionId)).academicYear;
   if (type === "students") {
     try {
       await assertStudentCapacity(user.institutionId, rows.length);
@@ -172,7 +174,7 @@ export async function POST(request: Request) {
             address: s(row, "Address"),
             admissionDate: s(row, "Admission Date"),
             totalFee: n(row, "Total Annual Fee"),
-            academicYear: s(row, "Academic Year") || "2026-2027",
+            academicYear: s(row, "Academic Year") || defaultAcademicYear,
             dueDate: s(row, "Due Date"),
           },
           user.id,
@@ -217,7 +219,7 @@ export async function POST(request: Request) {
           student.id,
           {
             feeType: s(row, "Fee Type") || "Annual Fee",
-            academicYear: s(row, "Academic Year") || "2026-2027",
+            academicYear: s(row, "Academic Year") || defaultAcademicYear,
             totalAmount: n(row, "Total Amount"),
             dueDate: s(row, "Due Date"),
           },

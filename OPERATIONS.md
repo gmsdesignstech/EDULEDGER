@@ -6,6 +6,7 @@ Set these secrets only in the hosting provider; never commit their values:
 
 - `DATABASE_URL` (or `POSTGRES_URL`): pooled PostgreSQL connection string.
 - `NEXT_PUBLIC_APP_URL`: canonical HTTPS origin.
+- `ADMIN_USER_ID`: immutable ID of the sole user whose database role is `SUPER_ADMIN` (preferred). `ADMIN_EMAIL` is the fallback identity selector.
 - `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET`: required when paid subscriptions are enabled.
 
 Optional integrations listed in `.env.example` must remain unset until their server-side implementation is enabled.
@@ -44,4 +45,3 @@ Back up uploaded assets through the object-storage provider's versioning/replica
 If a deployment fails, route traffic back to the last known-good application artifact. Do not restore an older database merely to roll back code. Apply a database restore only for confirmed corruption/data-loss incidents, with an approved recovery point and preserved forensic copy.
 
 If Razorpay is unavailable, stop new order creation and retain pending orders; never activate subscriptions based solely on a browser callback. Reconcile using signed webhooks/provider verification after recovery.
-

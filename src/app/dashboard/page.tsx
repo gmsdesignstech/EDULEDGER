@@ -8,6 +8,7 @@ import {
   UserRoundX,
   Users,
   WalletCards,
+  FileText,
 } from "lucide-react";
 import { dashboardData, listClassSummaries } from "@/lib/db";
 import { requireUser } from "@/lib/session";
@@ -51,9 +52,7 @@ export default async function Dashboard() {
           </p>
         </div>
         <div className="flex gap-2">
-          <Link href="/dashboard/attendance" className="btn-secondary">
-            Mark attendance
-          </Link>
+          {['SCHOOL_ADMIN','SUPER_ADMIN','ACCOUNTANT'].includes(user.role)&&<a href="/api/export?type=dashboard&format=pdf" target="_blank" rel="noreferrer" className="btn-secondary"><FileText className="size-4"/>PDF summary</a>}
           <Link href="/dashboard/students" className="btn-primary">
             + Add student
           </Link>

@@ -7,8 +7,8 @@ const allowedPrefixes = [
   "/api/subscription/",
   "/api/payments/verify",
   "/api/settings",
-  "/api/notifications",
   "/api/health",
+  "/api/admin",
 ];
 export async function proxy(request: NextRequest) {
   if (

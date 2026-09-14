@@ -1,33 +1,11 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { getInstitution, listAuditLogs, updateSettings } from "@/lib/db";
+import { getCompleteSettings, saveCompleteSettings } from "@/lib/db";
 import { currentUser } from "@/lib/session";
-export const runtime = "nodejs";
-const schema = z.object({
-  academicYear: z.string().min(4).max(20),
-  address: z.string().max(500),
-  phone: z.string().max(30),
-  email: z.union([z.literal(""), z.string().email()]),
-});
-export async function GET() {
-  const user = await currentUser();
-  return user
-    ? NextResponse.json({
-        settings: await getInstitution(user.institutionId),
-        auditLogs: await listAuditLogs(user.institutionId, 50),
-      })
-    : NextResponse.json({ error: "Unauthenticated" }, { status: 401 });
-}
-export async function PUT(request: Request) {
-  const user = await currentUser();
-  if (!user)
-    return NextResponse.json({ error: "Unauthenticated" }, { status: 401 });
-  if (!["SCHOOL_ADMIN", "SUPER_ADMIN"].includes(user.role))
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  const parsed = schema.safeParse(await request.json().catch(() => null));
-  return parsed.success
-    ? NextResponse.json({
-        settings: await updateSettings(user.institutionId, parsed.data, user.id),
-      })
-    : NextResponse.json({ error: "Invalid settings" }, { status: 400 });
-}
+import { logServerError } from "@/lib/server-errors";
+export const runtime="nodejs";
+const year=z.object({name:z.string().trim().regex(/^\d{4}-\d{4}$/,"Use YYYY-YYYY format").refine(v=>Number(v.slice(5))===Number(v.slice(0,4))+1,"Academic year must span consecutive years"),startMonth:z.number().int().min(1).max(12),endMonth:z.number().int().min(1).max(12),status:z.enum(["Active","Archived"])});
+const text=(max:number)=>z.string().trim().max(max);
+const schema=z.object({name:z.string().trim().min(2,"Please enter a valid school name.").max(120),academicYear:z.string(),startMonth:z.number().int().min(1).max(12),endMonth:z.number().int().min(1).max(12),address:text(200),phone:text(30).refine(v=>!v||/^[+\d][\d\s()-]{7,20}$/.test(v),"Enter a valid phone number"),email:z.union([z.literal(""),z.string().email()]),diseCode:text(30),website:z.union([z.literal(""),z.string().url()]),city:text(80),state:text(80),pinCode:text(12),principalName:text(100),registrationNumber:text(50),affiliation:text(100),motto:text(160),schoolType:text(50),feeReceiptTitle:text(80),feeReceiptSubheader:text(160),payslipTitle:text(80),payslipSubheader:text(160),footerText:text(200),signatureLabel:text(60),academicYears:z.array(year).min(1).max(30),classes:z.array(z.object({name:z.string().trim().min(1).max(50),sections:z.array(z.string().trim().min(1).max(20)).max(30).refine(v=>new Set(v.map(x=>x.toLowerCase())).size===v.length,"Duplicate section names are not allowed")})).max(50).refine(v=>new Set(v.map(x=>x.name.toLowerCase())).size===v.length,"Duplicate class names are not allowed")}).refine(v=>v.academicYears.some(y=>y.name===v.academicYear&&y.status==='Active'),{message:"The active academic year must exist and not be archived",path:["academicYear"]}).refine(v=>v.startMonth!==v.endMonth,{message:"Start and end months must be different",path:["endMonth"]});
+export async function GET(){const user=await currentUser();if(!user)return NextResponse.json({error:"Unauthenticated"},{status:401});if(["STUDENT","PARENT"].includes(user.role))return NextResponse.json({error:"Forbidden"},{status:403});return NextResponse.json({settings:await getCompleteSettings(user.institutionId),canEdit:["SCHOOL_ADMIN","SUPER_ADMIN"].includes(user.role)});}
+export async function PUT(request:Request){const user=await currentUser();if(!user)return NextResponse.json({error:"Unauthenticated"},{status:401});if(!["SCHOOL_ADMIN","SUPER_ADMIN"].includes(user.role))return NextResponse.json({error:"Forbidden"},{status:403});const parsed=schema.safeParse(await request.json().catch(()=>null));if(!parsed.success)return NextResponse.json({error:parsed.error.issues[0]?.message||"Invalid settings",field:parsed.error.issues[0]?.path.join(".")},{status:400});try{return NextResponse.json({settings:await saveCompleteSettings(user.institutionId,user.id,parsed.data)});}catch(error){logServerError("settings.update",error);return NextResponse.json({error:"Unable to save settings. Please try again."},{status:500});}}

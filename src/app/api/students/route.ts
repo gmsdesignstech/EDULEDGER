@@ -3,7 +3,7 @@ import { z } from "zod";
 import {
   addStudent,
   assertStudentCapacity,
-  getInstitution,
+  getCompleteSettings,
   listStudents,
 } from "@/lib/db";
 import { currentUser } from "@/lib/session";
@@ -19,7 +19,7 @@ const studentInputSchema = z.object({
   gender: z.enum(["Male", "Female", "Other"]),
   dateOfBirth: z.string().min(10),
   className: z.string().trim().min(1).max(40),
-  section: z.string().trim().min(1).max(10),
+  section: z.string().trim().max(20),
   rollNumber: z.string().trim().max(30),
   parent: z.string().trim().min(2).max(100),
   parentPhone: z
@@ -38,6 +38,7 @@ export async function GET(request: Request) {
   if (!user)
     return NextResponse.json({ error: "Unauthenticated" }, { status: 401 });
   const q = new URL(request.url).searchParams;
+  const settings=await getCompleteSettings(user.institutionId),selectedYear=q.get("year")||settings.academicYear;
   const students = await listStudents(user.institutionId, {
     search: q.get("search") || undefined,
     className: q.get("class") || undefined,
@@ -45,10 +46,13 @@ export async function GET(request: Request) {
     fee: q.get("fee") || undefined,
     limit: q.get("limit") ? Number(q.get("limit")) : undefined,
     offset: q.get("offset") ? Number(q.get("offset")) : undefined,
+    academicYear:selectedYear,
   });
   return NextResponse.json({
     students,
-    academicYear: (await getInstitution(user.institutionId)).academicYear,
+    academicYear: selectedYear,
+    academicYears:settings.years.map(item=>item.name),
+    configuredClasses: settings.classes.filter(item=>item.active).map(item=>({name:item.name,sections:item.sections})),
   });
 }
 export async function POST(request: Request) {

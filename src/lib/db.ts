@@ -40,6 +40,7 @@ export type DbStudent = {
   paidFee: number;
   pendingFee: number;
   status: string;
+  academicYear: string;
   createdAt: string;
 };
 export type DbTeacher = {
@@ -277,6 +278,13 @@ CREATE TABLE IF NOT EXISTS receipts(id TEXT PRIMARY KEY,institution_id TEXT NOT 
 CREATE TABLE IF NOT EXISTS activities(id TEXT PRIMARY KEY,institution_id TEXT NOT NULL REFERENCES institutions(id),type TEXT NOT NULL,title TEXT NOT NULL,description TEXT NOT NULL,student_id TEXT,payment_id TEXT,amount DOUBLE PRECISION,timestamp TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,status TEXT NOT NULL DEFAULT 'Success');
 CREATE TABLE IF NOT EXISTS notifications(id TEXT PRIMARY KEY,institution_id TEXT NOT NULL REFERENCES institutions(id),user_id TEXT,type TEXT NOT NULL,title TEXT NOT NULL,description TEXT NOT NULL DEFAULT '',read_at TIMESTAMPTZ,created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS settings(institution_id TEXT PRIMARY KEY REFERENCES institutions(id),academic_year TEXT NOT NULL DEFAULT '2026-2027',school_address TEXT NOT NULL DEFAULT '',school_phone TEXT NOT NULL DEFAULT '',school_email TEXT NOT NULL DEFAULT '',logo_url TEXT NOT NULL DEFAULT '',updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS academic_years(id TEXT PRIMARY KEY,institution_id TEXT NOT NULL REFERENCES institutions(id),name TEXT NOT NULL,start_month INTEGER NOT NULL DEFAULT 4 CHECK(start_month BETWEEN 1 AND 12),end_month INTEGER NOT NULL DEFAULT 3 CHECK(end_month BETWEEN 1 AND 12),status TEXT NOT NULL DEFAULT 'Active' CHECK(status IN ('Active','Archived')),is_active BOOLEAN NOT NULL DEFAULT FALSE,created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,UNIQUE(institution_id,name));
+CREATE TABLE IF NOT EXISTS institution_classes(id TEXT PRIMARY KEY,institution_id TEXT NOT NULL REFERENCES institutions(id),name TEXT NOT NULL,sort_order INTEGER NOT NULL DEFAULT 0,status TEXT NOT NULL DEFAULT 'Active' CHECK(status IN ('Active','Inactive')),created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,UNIQUE(institution_id,name));
+CREATE TABLE IF NOT EXISTS institution_sections(id TEXT PRIMARY KEY,institution_id TEXT NOT NULL REFERENCES institutions(id),class_id TEXT NOT NULL REFERENCES institution_classes(id) ON DELETE RESTRICT,name TEXT NOT NULL,sort_order INTEGER NOT NULL DEFAULT 0,status TEXT NOT NULL DEFAULT 'Active' CHECK(status IN ('Active','Inactive')),created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,UNIQUE(class_id,name));
+CREATE TABLE IF NOT EXISTS school_assets(id TEXT PRIMARY KEY,institution_id TEXT NOT NULL REFERENCES institutions(id),kind TEXT NOT NULL CHECK(kind IN ('logo','signature')),mime_type TEXT NOT NULL,data BYTEA NOT NULL,size_bytes INTEGER NOT NULL,updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,UNIQUE(institution_id,kind));
+CREATE TABLE IF NOT EXISTS student_enrollments(id TEXT PRIMARY KEY,institution_id TEXT NOT NULL REFERENCES institutions(id),student_id TEXT NOT NULL REFERENCES students(id) ON DELETE RESTRICT,academic_year TEXT NOT NULL,class_name TEXT NOT NULL,section TEXT NOT NULL DEFAULT '',status TEXT NOT NULL DEFAULT 'Active',promoted_from_enrollment_id TEXT REFERENCES student_enrollments(id) ON DELETE SET NULL,promoted_at TIMESTAMPTZ,promoted_by TEXT REFERENCES users(id) ON DELETE SET NULL,created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,UNIQUE(institution_id,student_id,academic_year));
+CREATE TABLE IF NOT EXISTS promotion_batches(id TEXT PRIMARY KEY,institution_id TEXT NOT NULL REFERENCES institutions(id),source_academic_year TEXT NOT NULL,target_academic_year TEXT NOT NULL,source_class TEXT NOT NULL,source_section TEXT NOT NULL DEFAULT '',target_class TEXT NOT NULL,target_section TEXT NOT NULL DEFAULT '',promoted_by TEXT NOT NULL REFERENCES users(id),promoted_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,status TEXT NOT NULL DEFAULT 'Completed',correction_reason TEXT);
+CREATE TABLE IF NOT EXISTS promotion_items(id TEXT PRIMARY KEY,batch_id TEXT NOT NULL REFERENCES promotion_batches(id) ON DELETE RESTRICT,institution_id TEXT NOT NULL REFERENCES institutions(id),student_id TEXT NOT NULL REFERENCES students(id) ON DELETE RESTRICT,source_enrollment_id TEXT NOT NULL REFERENCES student_enrollments(id),target_enrollment_id TEXT NOT NULL REFERENCES student_enrollments(id),status TEXT NOT NULL DEFAULT 'Promoted',error_message TEXT NOT NULL DEFAULT '',created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,UNIQUE(institution_id,student_id,target_enrollment_id));
 CREATE TABLE IF NOT EXISTS counters(institution_id TEXT NOT NULL,kind TEXT NOT NULL,year TEXT NOT NULL,value INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(institution_id,kind,year));
 CREATE TABLE IF NOT EXISTS audit_logs(id TEXT PRIMARY KEY,institution_id TEXT NOT NULL REFERENCES institutions(id),user_id TEXT,action TEXT NOT NULL,entity TEXT NOT NULL,entity_id TEXT,details JSONB NOT NULL DEFAULT '{}'::jsonb,created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS subscription_plans(id TEXT PRIMARY KEY,name TEXT NOT NULL UNIQUE,student_limit INTEGER NOT NULL,price DOUBLE PRECISION NOT NULL,billing_period TEXT NOT NULL DEFAULT 'year',active BOOLEAN NOT NULL DEFAULT TRUE,created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP);
@@ -287,8 +295,10 @@ CREATE TABLE IF NOT EXISTS timetable_entries(id TEXT PRIMARY KEY,institution_id 
 CREATE TABLE IF NOT EXISTS class_exams(id TEXT PRIMARY KEY,institution_id TEXT NOT NULL REFERENCES institutions(id),class_name TEXT NOT NULL,section TEXT NOT NULL,academic_year TEXT NOT NULL,name TEXT NOT NULL,exam_date TEXT NOT NULL,subject TEXT NOT NULL,max_marks DOUBLE PRECISION NOT NULL,passing_marks DOUBLE PRECISION NOT NULL,created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS class_results(id TEXT PRIMARY KEY,institution_id TEXT NOT NULL REFERENCES institutions(id),exam_id TEXT NOT NULL REFERENCES class_exams(id) ON DELETE CASCADE,student_id TEXT NOT NULL REFERENCES students(id) ON DELETE CASCADE,marks DOUBLE PRECISION NOT NULL,grade TEXT NOT NULL,status TEXT NOT NULL,created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,UNIQUE(exam_id,student_id));
 CREATE TABLE IF NOT EXISTS account_transactions(id TEXT PRIMARY KEY,institution_id TEXT NOT NULL REFERENCES institutions(id),academic_year TEXT NOT NULL,transaction_type TEXT NOT NULL CHECK(transaction_type IN ('income','expense')),category TEXT NOT NULL,amount_paise INTEGER NOT NULL CHECK(amount_paise>0),transaction_date TEXT NOT NULL,description TEXT NOT NULL,payment_method TEXT NOT NULL,reference_number TEXT NOT NULL DEFAULT '',source_type TEXT NOT NULL DEFAULT 'cash_book',source_id TEXT,status TEXT NOT NULL DEFAULT 'Active' CHECK(status IN ('Active','Voided')),notes TEXT NOT NULL DEFAULT '',created_by TEXT NOT NULL REFERENCES users(id),created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS salaries(id TEXT PRIMARY KEY,institution_id TEXT NOT NULL REFERENCES institutions(id),employee_key TEXT NOT NULL,teacher_id TEXT REFERENCES teachers(id) ON DELETE RESTRICT,user_id TEXT REFERENCES users(id) ON DELETE RESTRICT,employee_name TEXT NOT NULL,employee_number TEXT NOT NULL,employee_role TEXT NOT NULL,department TEXT NOT NULL DEFAULT '',designation TEXT NOT NULL DEFAULT '',salary_month INTEGER NOT NULL CHECK(salary_month BETWEEN 1 AND 12),salary_year INTEGER NOT NULL CHECK(salary_year BETWEEN 2000 AND 2200),basic_paise INTEGER NOT NULL CHECK(basic_paise>=0),allowances_paise INTEGER NOT NULL DEFAULT 0 CHECK(allowances_paise>=0),bonus_paise INTEGER NOT NULL DEFAULT 0 CHECK(bonus_paise>=0),overtime_paise INTEGER NOT NULL DEFAULT 0 CHECK(overtime_paise>=0),other_earnings_paise INTEGER NOT NULL DEFAULT 0 CHECK(other_earnings_paise>=0),gross_paise INTEGER NOT NULL CHECK(gross_paise>=0),deductions_paise INTEGER NOT NULL DEFAULT 0 CHECK(deductions_paise>=0),advance_deduction_paise INTEGER NOT NULL DEFAULT 0 CHECK(advance_deduction_paise>=0),other_deductions_paise INTEGER NOT NULL DEFAULT 0 CHECK(other_deductions_paise>=0),total_deductions_paise INTEGER NOT NULL CHECK(total_deductions_paise>=0),net_paise INTEGER NOT NULL CHECK(net_paise>=0),paid_paise INTEGER NOT NULL DEFAULT 0 CHECK(paid_paise>=0),payment_status TEXT NOT NULL DEFAULT 'Pending' CHECK(payment_status IN ('Pending','Paid','Partially Paid','Cancelled','On Hold')),payment_date TEXT,payment_method TEXT,payment_reference TEXT NOT NULL DEFAULT '',payment_notes TEXT NOT NULL DEFAULT '',notes TEXT NOT NULL DEFAULT '',payslip_number TEXT NOT NULL UNIQUE,created_by TEXT NOT NULL REFERENCES users(id),created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,UNIQUE(employee_key,salary_month,salary_year));
 CREATE INDEX IF NOT EXISTS idx_students_institution ON students(institution_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_single_super_admin ON users(role) WHERE role='SUPER_ADMIN';
 CREATE INDEX IF NOT EXISTS idx_module_records ON module_records(institution_id,module);
 CREATE INDEX IF NOT EXISTS idx_attendance_scope ON attendance(institution_id,date,status);
 CREATE INDEX IF NOT EXISTS idx_fees_scope ON fees(institution_id,status,due_date);
@@ -296,8 +306,24 @@ CREATE INDEX IF NOT EXISTS idx_payments_scope ON payments(institution_id,payment
 CREATE INDEX IF NOT EXISTS idx_timetable_class ON timetable_entries(institution_id,class_name,academic_year);
 CREATE INDEX IF NOT EXISTS idx_exams_class ON class_exams(institution_id,class_name,academic_year);
 CREATE INDEX IF NOT EXISTS idx_accounts_scope ON account_transactions(institution_id,academic_year,transaction_date,status);
+CREATE INDEX IF NOT EXISTS idx_salaries_scope ON salaries(institution_id,salary_year,salary_month,payment_status);
+CREATE INDEX IF NOT EXISTS idx_salaries_employee ON salaries(employee_key,created_at);
+CREATE INDEX IF NOT EXISTS idx_salaries_payment_date ON salaries(payment_date);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_accounts_source ON account_transactions(institution_id,source_type,source_id) WHERE source_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_academic_years_scope ON academic_years(institution_id,status,is_active);
+CREATE INDEX IF NOT EXISTS idx_institution_classes_scope ON institution_classes(institution_id,status,sort_order);
+CREATE INDEX IF NOT EXISTS idx_institution_sections_scope ON institution_sections(institution_id,class_id,status,sort_order);
+CREATE INDEX IF NOT EXISTS idx_enrollments_scope ON student_enrollments(institution_id,academic_year,class_name,section,status);
+CREATE INDEX IF NOT EXISTS idx_promotion_batches_scope ON promotion_batches(institution_id,promoted_at);
+CREATE INDEX IF NOT EXISTS idx_promotion_items_scope ON promotion_items(institution_id,student_id,created_at);
 `);
+    await sql.unsafe(`CREATE TABLE IF NOT EXISTS admin_settings(id TEXT PRIMARY KEY,application_name TEXT NOT NULL DEFAULT 'EduLedger',support_email TEXT NOT NULL DEFAULT '',currency TEXT NOT NULL DEFAULT 'INR',timezone TEXT NOT NULL DEFAULT 'Asia/Kolkata',date_format TEXT NOT NULL DEFAULT 'DD/MM/YYYY',session_timeout_minutes INTEGER NOT NULL DEFAULT 10080,updated_by TEXT,updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP);`);
+    const additions={settings:["dise_code TEXT NOT NULL DEFAULT ''","website TEXT NOT NULL DEFAULT ''","city TEXT NOT NULL DEFAULT ''","state TEXT NOT NULL DEFAULT ''","pin_code TEXT NOT NULL DEFAULT ''","principal_name TEXT NOT NULL DEFAULT ''","registration_number TEXT NOT NULL DEFAULT ''","affiliation TEXT NOT NULL DEFAULT ''","motto TEXT NOT NULL DEFAULT ''","school_type TEXT NOT NULL DEFAULT ''","fee_receipt_title TEXT NOT NULL DEFAULT 'Fee Payment Receipt'","fee_receipt_subheader TEXT NOT NULL DEFAULT 'Standard Fee Receipt Template'","payslip_title TEXT NOT NULL DEFAULT 'Pay Slip'","payslip_subheader TEXT NOT NULL DEFAULT 'Standard Pay Slip Template'","footer_text TEXT NOT NULL DEFAULT ''","signature_label TEXT NOT NULL DEFAULT 'Authorized Signatory'"],students:["academic_year TEXT NOT NULL DEFAULT ''","leaving_date TEXT","leaving_reason TEXT NOT NULL DEFAULT ''","graduation_date TEXT"],users:["status TEXT NOT NULL DEFAULT 'Active'","last_login_at TIMESTAMPTZ"],institutions:["status TEXT NOT NULL DEFAULT 'Active'"]} as const;
+    if(sql.dialect==="sqlite"){
+      for(const [table,definitions] of Object.entries(additions)){const columns=new Set((await sql.unsafe(`PRAGMA table_info(${table})`) as unknown as {name:string}[]).map(x=>x.name));for(const definition of definitions)if(!columns.has(definition.split(" ")[0]))await sql.unsafe(`ALTER TABLE ${table} ADD COLUMN ${definition}`)}
+    }else{
+      for(const [table,definitions] of Object.entries(additions))for(const definition of definitions)await sql.unsafe(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS ${definition}`);
+    }
     for (const p of SUBSCRIPTION_PLANS)
       await run(
         "INSERT INTO subscription_plans(id,name,student_limit,price,billing_period,active)VALUES(?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=EXCLUDED.name,student_limit=EXCLUDED.student_limit,price=EXCLUDED.price,billing_period=EXCLUDED.billing_period,active=EXCLUDED.active,updated_at=CURRENT_TIMESTAMP",
@@ -317,6 +343,7 @@ async function ready() {
 export async function databaseHealth() {
   await row<{ ok: number }>("SELECT 1 AS ok", [], await ready());
 }
+export async function recordUserLogin(userId:string){await run("UPDATE users SET last_login_at=CURRENT_TIMESTAMP WHERE id=?",[userId],await ready())}
 async function audit(
   institutionId: string,
   userId: string | undefined,
@@ -407,15 +434,18 @@ export async function getInstitution(institutionId: string) {
     email: string;
     logoUrl: string;
     academicYear: string;
+    diseCode: string; website: string; city: string; state: string; pinCode: string;
+    principalName: string; registrationNumber: string; affiliation: string; motto: string; schoolType: string;
+    feeReceiptTitle: string; feeReceiptSubheader: string; payslipTitle: string; payslipSubheader: string; footerText: string; signatureLabel: string;
   }>(
-    "SELECT i.id,i.name,COALESCE(s.school_address,'') address,COALESCE(s.school_phone,'') phone,COALESCE(s.school_email,'') email,COALESCE(s.logo_url,'') AS \"logoUrl\",COALESCE(s.academic_year,'2026-2027') AS \"academicYear\" FROM institutions i LEFT JOIN settings s ON s.institution_id=i.id WHERE i.id=?",
+    `SELECT i.id,i.name,COALESCE(s.school_address,'') address,COALESCE(s.school_phone,'') phone,COALESCE(s.school_email,'') email,COALESCE(s.logo_url,'') AS "logoUrl",COALESCE(s.academic_year,'2026-2027') AS "academicYear",COALESCE(s.dise_code,'') AS "diseCode",COALESCE(s.website,'') website,COALESCE(s.city,'') city,COALESCE(s.state,'') state,COALESCE(s.pin_code,'') AS "pinCode",COALESCE(s.principal_name,'') AS "principalName",COALESCE(s.registration_number,'') AS "registrationNumber",COALESCE(s.affiliation,'') affiliation,COALESCE(s.motto,'') motto,COALESCE(s.school_type,'') AS "schoolType",COALESCE(s.fee_receipt_title,'Fee Payment Receipt') AS "feeReceiptTitle",COALESCE(s.fee_receipt_subheader,'Standard Fee Receipt Template') AS "feeReceiptSubheader",COALESCE(s.payslip_title,'Pay Slip') AS "payslipTitle",COALESCE(s.payslip_subheader,'Standard Pay Slip Template') AS "payslipSubheader",COALESCE(s.footer_text,'') AS "footerText",COALESCE(s.signature_label,'Authorized Signatory') AS "signatureLabel" FROM institutions i LEFT JOIN settings s ON s.institution_id=i.id WHERE i.id=?`,
     [institutionId],
     await ready(),
   );
 }
 export async function findUserByEmail(email: string) {
-  return await row<DbUser & { passwordHash: string }>(
-    'SELECT id,email,name,password_hash AS "passwordHash",role,institution_id AS "institutionId" FROM users WHERE email=?',
+  return await row<DbUser & { passwordHash: string; status:string }>(
+    'SELECT id,email,name,password_hash AS "passwordHash",role,status,institution_id AS "institutionId" FROM users WHERE email=?',
     [email.toLowerCase()],
     await ready(),
   );
@@ -465,7 +495,11 @@ export async function createAccount(input: {
 export async function createSession(userId: string) {
   const db = await ready(),
     token = randomUUID() + randomUUID().replaceAll("-", ""),
-    expires = new Date(Date.now() + 7 * 864e5);
+    account=await row<{id:string;email:string;role:string}>("SELECT id,email,role FROM users WHERE id=?",[userId],db),
+    configuredId=process.env.ADMIN_USER_ID?.trim(),configuredEmail=process.env.ADMIN_EMAIL?.trim().toLowerCase(),
+    isAdmin=Boolean(account&&account.role==="SUPER_ADMIN"&&(configuredId?account.id===configuredId:configuredEmail&&account.email.toLowerCase()===configuredEmail)),
+    adminSettings=isAdmin?await row<{minutes:number}>('SELECT session_timeout_minutes AS minutes FROM admin_settings WHERE id=\'global\'',[],db):undefined,
+    expires = new Date(Date.now() + (adminSettings?.minutes||10080) * 60_000);
   await run("DELETE FROM sessions WHERE expires_at<CURRENT_TIMESTAMP", [], db);
   await run(
     "INSERT INTO sessions(token,user_id,expires_at)VALUES(?,?,?)",
@@ -476,7 +510,7 @@ export async function createSession(userId: string) {
 }
 export async function getUserBySession(token: string) {
   return await row<DbUser>(
-    'SELECT u.id,u.email,u.name,u.role,u.institution_id AS "institutionId" FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=? AND s.expires_at>CURRENT_TIMESTAMP',
+    'SELECT u.id,u.email,u.name,u.role,u.institution_id AS "institutionId" FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=? AND s.expires_at>CURRENT_TIMESTAMP AND u.status=\'Active\'',
     [token],
     await ready(),
   );
@@ -485,7 +519,7 @@ export async function deleteSession(token: string) {
   await run("DELETE FROM sessions WHERE token=?", [token], await ready());
 }
 
-const studentSelect = `SELECT s.id,s.name,s.admission,s.gender,s.date_of_birth AS "dateOfBirth",s.class_name AS "className",s.section,s.grade,s.roll_number AS "rollNumber",s.parent,s.parent_phone AS "parentPhone",s.parent_email AS "parentEmail",s.address,s.admission_date AS "admissionDate",s.attendance,s.fee,s.total_fee AS "totalFee",s.paid_fee AS "paidFee",s.pending_fee AS "pendingFee",s.status,s.created_at::text AS "createdAt" FROM students s`;
+const studentSelect = `SELECT s.id,s.name,s.admission,s.gender,s.date_of_birth AS "dateOfBirth",s.class_name AS "className",s.section,s.grade,s.roll_number AS "rollNumber",s.parent,s.parent_phone AS "parentPhone",s.parent_email AS "parentEmail",s.address,s.admission_date AS "admissionDate",s.attendance,s.fee,s.total_fee AS "totalFee",s.paid_fee AS "paidFee",s.pending_fee AS "pendingFee",s.status,s.academic_year AS "academicYear",s.created_at::text AS "createdAt" FROM students s`;
 async function refreshFees(institutionId: string, sql?: Sql) {
   const db = sql ?? (await ready()),
     today = new Date().toISOString().slice(0, 10);
@@ -507,14 +541,18 @@ export async function listStudents(
     className?: string;
     section?: string;
     fee?: string;
+    academicYear?: string;
     limit?: number;
     offset?: number;
   } = {},
 ) {
   const db = await ready();
+  if(filters.academicYear)await ensureStudentEnrollments(institutionId,db);
   await refreshFees(institutionId, db);
   const where = ["s.institution_id=?"],
     args: unknown[] = [institutionId];
+  const scopedSelect=filters.academicYear?studentSelect.replace('s.class_name AS "className",s.section','e.class_name AS "className",e.section').replace('s.academic_year AS "academicYear"','e.academic_year AS "academicYear"').replace(' FROM students s',' FROM students s JOIN student_enrollments e ON e.student_id=s.id AND e.institution_id=s.institution_id') : studentSelect;
+  if(filters.academicYear){where.push("e.academic_year=?");args.push(filters.academicYear)}
   if (filters.search) {
     where.push(
       "(s.name ILIKE ? OR s.admission ILIKE ? OR s.parent_phone ILIKE ?)",
@@ -523,15 +561,15 @@ export async function listStudents(
     args.push(q, q, q);
   }
   for (const [k, col] of [
-    ["className", "s.class_name"],
-    ["section", "s.section"],
+    ["className", filters.academicYear ? "e.class_name" : "s.class_name"],
+    ["section", filters.academicYear ? "e.section" : "s.section"],
     ["fee", "s.fee"],
   ] as const)
     if (filters[k]) {
       where.push(`${col}=?`);
       args.push(filters[k]);
     }
-  let query = `${studentSelect} WHERE ${where.join(" AND ")} ORDER BY s.created_at DESC`;
+  let query = `${scopedSelect} WHERE ${where.join(" AND ")} ORDER BY s.created_at DESC`;
   if (filters.limit) {
     query += " LIMIT ? OFFSET ?";
     args.push(filters.limit, filters.offset ?? 0);
@@ -569,7 +607,7 @@ export async function addStudent(
     pending = Math.max(input.totalFee, 0);
   await connection().begin(async (tx) => {
     await run(
-      "INSERT INTO students(id,institution_id,name,admission,gender,date_of_birth,class_name,section,grade,roll_number,parent,parent_phone,parent_email,address,admission_date,total_fee,paid_fee,pending_fee,attendance,fee,status)VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+      "INSERT INTO students(id,institution_id,name,admission,gender,date_of_birth,class_name,section,grade,roll_number,parent,parent_phone,parent_email,address,admission_date,total_fee,paid_fee,pending_fee,attendance,fee,status,academic_year)VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
       [
         id,
         institutionId,
@@ -592,9 +630,11 @@ export async function addStudent(
         100,
         pending ? "Pending" : "Paid",
         "Active",
+        input.academicYear,
       ],
       tx,
     );
+    await run("INSERT INTO student_enrollments(id,institution_id,student_id,academic_year,class_name,section,status)VALUES(?,?,?,?,?,?,'Active')",[randomUUID(),institutionId,id,input.academicYear,input.className,input.section],tx);
     if (input.totalFee > 0) {
       const invoice = await nextNumber(institutionId, "INV", today, tx);
       await run(
@@ -655,7 +695,7 @@ export async function updateStudent(
   const value = { ...old, ...input },
     db = await ready();
   await run(
-    "UPDATE students SET name=?,admission=?,gender=?,date_of_birth=?,class_name=?,section=?,grade=?,roll_number=?,parent=?,parent_phone=?,parent_email=?,address=?,admission_date=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND institution_id=?",
+    "UPDATE students SET name=?,admission=?,gender=?,date_of_birth=?,class_name=?,section=?,grade=?,roll_number=?,parent=?,parent_phone=?,parent_email=?,address=?,admission_date=?,academic_year=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND institution_id=?",
     [
       value.name,
       value.admission,
@@ -670,6 +710,7 @@ export async function updateStudent(
       value.parentEmail,
       value.address,
       value.admissionDate,
+      value.academicYear,
       id,
       institutionId,
     ],
@@ -877,7 +918,9 @@ export async function attendanceRoster(
   date: string,
   className: string,
   section: string,
+  academicYear?: string,
 ) {
+  const db=await ready();if(academicYear)await ensureStudentEnrollments(institutionId,db);
   return await rows<{
     studentId: string;
     name: string;
@@ -887,9 +930,9 @@ export async function attendanceRoster(
     status: string;
     remarks: string;
   }>(
-    "SELECT s.id AS \"studentId\",s.name,s.admission,s.class_name AS \"className\",s.section,COALESCE(a.status,'Present') status,COALESCE(a.remarks,'') remarks FROM students s LEFT JOIN attendance a ON a.student_id=s.id AND a.date=? WHERE s.institution_id=? AND s.class_name=? AND s.section=? AND s.status='Active' ORDER BY s.name",
-    [date, institutionId, className, section],
-    await ready(),
+    academicYear?"SELECT s.id AS \"studentId\",s.name,s.admission,e.class_name AS \"className\",e.section,COALESCE(a.status,'Present') status,COALESCE(a.remarks,'') remarks FROM student_enrollments e JOIN students s ON s.id=e.student_id LEFT JOIN attendance a ON a.student_id=s.id AND a.date=? WHERE e.institution_id=? AND e.academic_year=? AND e.class_name=? AND e.section=? AND LOWER(s.status)='active' ORDER BY s.name":"SELECT s.id AS \"studentId\",s.name,s.admission,s.class_name AS \"className\",s.section,COALESCE(a.status,'Present') status,COALESCE(a.remarks,'') remarks FROM students s LEFT JOIN attendance a ON a.student_id=s.id AND a.date=? WHERE s.institution_id=? AND s.class_name=? AND s.section=? AND s.status='Active' ORDER BY s.name",
+    academicYear?[date,institutionId,academicYear,className,section]:[date, institutionId, className, section],
+    db,
   );
 }
 export async function listAttendance(
@@ -899,14 +942,16 @@ export async function listAttendance(
     className?: string;
     section?: string;
     status?: string;
+    academicYear?: string;
   } = {},
 ) {
-  const where = ["a.institution_id=?"],
+  const db=await ready(),where = ["a.institution_id=?"],
     args: unknown[] = [institutionId];
+  if(filters.academicYear){await ensureStudentEnrollments(institutionId,db);const year=await row<{startMonth:number;endMonth:number}>('SELECT start_month AS "startMonth",end_month AS "endMonth" FROM academic_years WHERE institution_id=? AND name=?',[institutionId,filters.academicYear],db),startYear=Number(filters.academicYear.slice(0,4)),startMonth=year?.startMonth||4,endMonth=year?.endMonth||3,endYear=endMonth<startMonth?startYear+1:startYear,start=`${startYear}-${String(startMonth).padStart(2,'0')}-01`,endDate=new Date(Date.UTC(endYear,endMonth,0)).toISOString().slice(0,10);where.push("e.academic_year=?","a.date>=?","a.date<=?");args.push(filters.academicYear,start,endDate)}
   for (const [k, col] of [
     ["date", "a.date"],
-    ["className", "s.class_name"],
-    ["section", "s.section"],
+    ["className", filters.academicYear?"e.class_name":"s.class_name"],
+    ["section", filters.academicYear?"e.section":"s.section"],
     ["status", "a.status"],
   ] as const)
     if (filters[k]) {
@@ -914,9 +959,9 @@ export async function listAttendance(
       args.push(filters[k]);
     }
   return await rows(
-    `SELECT a.id,a.date,s.name AS "studentName",s.admission,s.class_name AS "className",s.section,a.status,a.remarks,a.marked_by AS "markedBy" FROM attendance a JOIN students s ON s.id=a.student_id WHERE ${where.join(" AND ")} ORDER BY a.date DESC,s.name`,
+    `SELECT a.id,a.date,s.name AS "studentName",s.admission,${filters.academicYear?'e.class_name':'s.class_name'} AS "className",${filters.academicYear?'e.section':'s.section'} AS section,a.status,a.remarks,a.marked_by AS "markedBy" FROM attendance a JOIN students s ON s.id=a.student_id ${filters.academicYear?'JOIN student_enrollments e ON e.student_id=s.id AND e.institution_id=s.institution_id':''} WHERE ${where.join(" AND ")} ORDER BY a.date DESC,s.name`,
     args,
-    await ready(),
+    db,
   );
 }
 export async function markAttendance(
@@ -1093,6 +1138,7 @@ export async function getReceipt(institutionId: string, receipt: string) {
     await ready(),
   );
 }
+export async function getReceiptForAdmin(receipt:string){return row<DbPayment&{institutionId:string}>(`${paymentSelect.replace("SELECT p.id","SELECT p.institution_id AS \"institutionId\",p.id")} WHERE p.receipt_number=?`,[receipt],await ready())}
 export async function listPayments(
   institutionId: string,
   filters: {
@@ -1332,23 +1378,6 @@ export async function dashboardData(institutionId: string) {
     activities,
   };
 }
-export async function listNotifications(institutionId: string, userId: string) {
-  return await rows(
-    'SELECT id,type,title,description,read_at::text AS "readAt",created_at::text AS "createdAt" FROM notifications WHERE institution_id=? AND (user_id IS NULL OR user_id=?) ORDER BY created_at DESC LIMIT 25',
-    [institutionId, userId],
-    await ready(),
-  );
-}
-export async function markNotificationsRead(
-  institutionId: string,
-  userId: string,
-) {
-  await run(
-    "UPDATE notifications SET read_at=CURRENT_TIMESTAMP WHERE institution_id=? AND (user_id IS NULL OR user_id=?) AND read_at IS NULL",
-    [institutionId, userId],
-    await ready(),
-  );
-}
 export async function updateSettings(
   institutionId: string,
   input: {
@@ -1382,6 +1411,69 @@ export async function updateSettings(
   );
   return await getInstitution(institutionId);
 }
+
+export type CompleteSettingsInput = {
+  name:string; academicYear:string; startMonth:number; endMonth:number;
+  address:string; phone:string; email:string; diseCode:string; website:string; city:string; state:string; pinCode:string;
+  principalName:string; registrationNumber:string; affiliation:string; motto:string; schoolType:string;
+  feeReceiptTitle:string; feeReceiptSubheader:string; payslipTitle:string; payslipSubheader:string; footerText:string; signatureLabel:string;
+  academicYears:{name:string;startMonth:number;endMonth:number;status:"Active"|"Archived"}[];
+  classes:{name:string;sections:string[]}[];
+};
+
+export async function getCompleteSettings(institutionId:string) {
+  const db=await ready(), institution=await getInstitution(institutionId);
+  await run("INSERT INTO academic_years(id,institution_id,name,start_month,end_month,status,is_active)VALUES(?,?,?,?,?,'Active',TRUE) ON CONFLICT(institution_id,name) DO NOTHING",[randomUUID(),institutionId,institution.academicYear,4,3],db);
+  const existing=await row<{count:number}>("SELECT COUNT(*)::int count FROM institution_classes WHERE institution_id=?",[institutionId],db);
+  if(!existing.count){
+    const names=await rows<{name:string}>("SELECT DISTINCT name FROM classes WHERE institution_id=? ORDER BY name",[institutionId],db);
+    const seed=names.length?names.map(x=>x.name):STANDARD_CLASSES.map(x=>x.name);
+    for(const [index,name] of seed.entries()) await run("INSERT INTO institution_classes(id,institution_id,name,sort_order)VALUES(?,?,?,?) ON CONFLICT(institution_id,name) DO NOTHING",[randomUUID(),institutionId,name,index],db);
+  }
+  const years=await rows<{name:string;startMonth:number;endMonth:number;status:"Active"|"Archived";isActive:boolean}>('SELECT name,start_month AS "startMonth",end_month AS "endMonth",status,is_active AS "isActive" FROM academic_years WHERE institution_id=? ORDER BY name DESC',[institutionId],db);
+  const classRows=await rows<{id:string;name:string;status:string}>('SELECT id,name,status FROM institution_classes WHERE institution_id=? ORDER BY sort_order,name',[institutionId],db);
+  const sectionRows=await rows<{classId:string;name:string}>('SELECT class_id AS "classId",name FROM institution_sections WHERE institution_id=? AND status=\'Active\' ORDER BY sort_order,name',[institutionId],db);
+  const assets=await rows<{kind:string}>('SELECT kind FROM school_assets WHERE institution_id=?',[institutionId],db);
+  const legacy=await rows<{name:string;section:string}>('SELECT DISTINCT name,section FROM classes WHERE institution_id=? AND academic_year=? ORDER BY name,section',[institutionId,institution.academicYear],db);
+  return { ...institution, logoUrl:assets.some(x=>x.kind==='logo')?"/api/settings/assets/logo":"", signatureUrl:assets.some(x=>x.kind==='signature')?"/api/settings/assets/signature":"", years, classes:classRows.map(item=>({id:item.id,name:item.name,active:item.status==='Active',sections:Array.from(new Set([...sectionRows.filter(x=>x.classId===item.id).map(x=>x.name),...legacy.filter(x=>x.name===item.name).map(x=>x.section)]))})) };
+}
+
+export async function saveCompleteSettings(institutionId:string,userId:string,input:CompleteSettingsInput){
+  const db=await ready();
+  await db.begin(async tx=>{
+    await run("UPDATE institutions SET name=? WHERE id=?",[input.name,institutionId],tx);
+    await run(`INSERT INTO settings(institution_id,academic_year,school_address,school_phone,school_email,dise_code,website,city,state,pin_code,principal_name,registration_number,affiliation,motto,school_type,fee_receipt_title,fee_receipt_subheader,payslip_title,payslip_subheader,footer_text,signature_label) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(institution_id) DO UPDATE SET academic_year=EXCLUDED.academic_year,school_address=EXCLUDED.school_address,school_phone=EXCLUDED.school_phone,school_email=EXCLUDED.school_email,dise_code=EXCLUDED.dise_code,website=EXCLUDED.website,city=EXCLUDED.city,state=EXCLUDED.state,pin_code=EXCLUDED.pin_code,principal_name=EXCLUDED.principal_name,registration_number=EXCLUDED.registration_number,affiliation=EXCLUDED.affiliation,motto=EXCLUDED.motto,school_type=EXCLUDED.school_type,fee_receipt_title=EXCLUDED.fee_receipt_title,fee_receipt_subheader=EXCLUDED.fee_receipt_subheader,payslip_title=EXCLUDED.payslip_title,payslip_subheader=EXCLUDED.payslip_subheader,footer_text=EXCLUDED.footer_text,signature_label=EXCLUDED.signature_label,updated_at=CURRENT_TIMESTAMP`,[institutionId,input.academicYear,input.address,input.phone,input.email,input.diseCode,input.website,input.city,input.state,input.pinCode,input.principalName,input.registrationNumber,input.affiliation,input.motto,input.schoolType,input.feeReceiptTitle,input.feeReceiptSubheader,input.payslipTitle,input.payslipSubheader,input.footerText,input.signatureLabel],tx);
+    await run("UPDATE academic_years SET is_active=FALSE WHERE institution_id=?",[institutionId],tx);
+    for(const year of input.academicYears) await run("INSERT INTO academic_years(id,institution_id,name,start_month,end_month,status,is_active)VALUES(?,?,?,?,?,?,?) ON CONFLICT(institution_id,name) DO UPDATE SET start_month=EXCLUDED.start_month,end_month=EXCLUDED.end_month,status=EXCLUDED.status,is_active=EXCLUDED.is_active,updated_at=CURRENT_TIMESTAMP",[randomUUID(),institutionId,year.name,year.startMonth,year.endMonth,year.status,year.name===input.academicYear],tx);
+    for(const [order,item] of input.classes.entries()){
+      const saved=await row<{id:string}>("INSERT INTO institution_classes(id,institution_id,name,sort_order,status)VALUES(?,?,?,?,'Active') ON CONFLICT(institution_id,name) DO UPDATE SET sort_order=EXCLUDED.sort_order,status='Active',updated_at=CURRENT_TIMESTAMP RETURNING id",[randomUUID(),institutionId,item.name,order],tx);
+      for(const [sectionOrder,name] of item.sections.entries()) await run("INSERT INTO institution_sections(id,institution_id,class_id,name,sort_order,status)VALUES(?,?,?,?,?,'Active') ON CONFLICT(class_id,name) DO UPDATE SET sort_order=EXCLUDED.sort_order,status='Active',updated_at=CURRENT_TIMESTAMP",[randomUUID(),institutionId,saved.id,name,sectionOrder],tx);
+      const keptSections=item.sections.length?item.sections:["__none__"];
+      await run(`UPDATE institution_sections SET status='Inactive' WHERE institution_id=? AND class_id=? AND name NOT IN (${keptSections.map(()=>"?").join(",")})`,[institutionId,saved.id,...keptSections],tx);
+    }
+    const keptClasses=input.classes.length?input.classes.map(x=>x.name):["__none__"];
+    await run(`UPDATE institution_classes SET status='Inactive' WHERE institution_id=? AND name NOT IN (${keptClasses.map(()=>"?").join(",")})`,[institutionId,...keptClasses],tx);
+    await audit(institutionId,userId,"Institution Settings Updated","Settings",institutionId,{academicYear:input.academicYear,classCount:input.classes.length},tx);
+  });
+  return getCompleteSettings(institutionId);
+}
+
+export async function putSchoolAsset(institutionId:string,userId:string,kind:"logo"|"signature",mimeType:string,data:Buffer){const db=await ready();await run("INSERT INTO school_assets(id,institution_id,kind,mime_type,data,size_bytes)VALUES(?,?,?,?,?,?) ON CONFLICT(institution_id,kind) DO UPDATE SET mime_type=EXCLUDED.mime_type,data=EXCLUDED.data,size_bytes=EXCLUDED.size_bytes,updated_at=CURRENT_TIMESTAMP",[randomUUID(),institutionId,kind,mimeType,data,data.length],db);await audit(institutionId,userId,`${kind==='logo'?'Logo':'Signature'} Updated`,"SchoolAsset",kind,{},db)}
+export async function getSchoolAsset(institutionId:string,kind:"logo"|"signature"){return row<{mimeType:string;data:Buffer}>('SELECT mime_type AS "mimeType",data FROM school_assets WHERE institution_id=? AND kind=?',[institutionId,kind],await ready())}
+export async function deleteSchoolAsset(institutionId:string,userId:string,kind:"logo"|"signature"){const db=await ready();await run("DELETE FROM school_assets WHERE institution_id=? AND kind=?",[institutionId,kind],db);await audit(institutionId,userId,`${kind==='logo'?'Logo':'Signature'} Removed`,"SchoolAsset",kind,{},db)}
+
+export async function listArchivedStudents(institutionId:string,status:"Left"|"Graduated"){return rows(`${studentSelect.replace(' FROM students s',',s.leaving_date AS "leavingDate",s.leaving_reason AS "reason",s.graduation_date AS "graduationDate" FROM students s')} WHERE s.institution_id=? AND LOWER(s.status)=LOWER(?) ORDER BY s.name`,[institutionId,status],await ready())}
+
+export type PromotionInput={sourceYear:string;targetYear:string;sourceClass:string;sourceSection:string;targetClass:string;targetSection:string;studentIds:string[]};
+async function ensureStudentEnrollments(institutionId:string,sql?:Sql){const db=sql??await ready();await run("INSERT INTO student_enrollments(id,institution_id,student_id,academic_year,class_name,section,status) SELECT 'legacy-'||s.id||'-'||s.academic_year,s.institution_id,s.id,s.academic_year,s.class_name,s.section,CASE WHEN LOWER(s.status)='active' THEN 'Active' ELSE s.status END FROM students s WHERE s.institution_id=? AND s.academic_year<>'' ON CONFLICT(institution_id,student_id,academic_year) DO NOTHING",[institutionId],db)}
+export async function promotionOptions(institutionId:string){const db=await ready();await ensureStudentEnrollments(institutionId,db);const settings=await getCompleteSettings(institutionId);return {years:settings.years.filter(x=>x.status==='Active').map(x=>x.name),classes:settings.classes.filter(x=>x.active).map(x=>({name:x.name,sections:x.sections}))}}
+export async function promotionCandidates(institutionId:string,sourceYear:string,sourceClass:string,sourceSection:string){await ensureStudentEnrollments(institutionId);return rows<{id:string;name:string;admission:string;parent:string;parentPhone:string;className:string;section:string;academicYear:string;status:string}>('SELECT s.id,s.name,s.admission,s.parent,s.parent_phone AS "parentPhone",e.class_name AS "className",e.section,e.academic_year AS "academicYear",s.status FROM student_enrollments e JOIN students s ON s.id=e.student_id WHERE e.institution_id=? AND e.academic_year=? AND e.class_name=? AND e.section=? ORDER BY s.name',[institutionId,sourceYear,sourceClass,sourceSection],await ready())}
+export async function validatePromotion(institutionId:string,input:PromotionInput,sql?:Sql){const db=sql??await ready();await ensureStudentEnrollments(institutionId,db);const errors:string[]=[];if(input.sourceYear===input.targetYear)errors.push("Source and target academic years must be different.");const years=await rows<{name:string}>("SELECT name FROM academic_years WHERE institution_id=? AND status='Active' AND name IN (?,?)",[institutionId,input.sourceYear,input.targetYear],db);if(years.length!==2)errors.push("Source or target academic year is unavailable.");const configs=await rows<{name:string}>("SELECT name FROM institution_classes WHERE institution_id=? AND status='Active' AND name IN (?,?)",[institutionId,input.sourceClass,input.targetClass],db);if(new Set(configs.map(x=>x.name)).size!==new Set([input.sourceClass,input.targetClass]).size)errors.push("Source or target class is not configured.");for(const [className,section] of [[input.sourceClass,input.sourceSection],[input.targetClass,input.targetSection]])if(section){const valid=await row<{count:number}>("SELECT COUNT(*)::int count FROM institution_sections x JOIN institution_classes c ON c.id=x.class_id WHERE x.institution_id=? AND c.name=? AND x.name=? AND x.status='Active'",[institutionId,className,section],db);if(!valid.count)errors.push(`Section ${section} does not belong to ${className}.`)}
+ const selected=Array.from(new Set(input.studentIds));if(!selected.length)errors.push("Select at least one student.");const items:selectedPromotionItem[]=selected.length?await rows(`SELECT s.id,s.name,s.admission,s.status,e.id AS "sourceEnrollmentId",e.class_name AS "previousClass",e.section AS "previousSection",e.academic_year AS "previousYear",CASE WHEN LOWER(s.status)<>'active' THEN 'Ineligible' WHEN target.id IS NOT NULL THEN 'Already promoted' ELSE 'Ready' END AS "promotionStatus" FROM students s JOIN student_enrollments e ON e.student_id=s.id AND e.institution_id=s.institution_id LEFT JOIN student_enrollments target ON target.student_id=s.id AND target.institution_id=s.institution_id AND target.academic_year=? WHERE s.institution_id=? AND s.id IN (${selected.map(()=>'?').join(',')}) AND e.academic_year=? AND e.class_name=? AND e.section=?`,[input.targetYear,institutionId,...selected,input.sourceYear,input.sourceClass,input.sourceSection],db):[];if(items.length!==selected.length)errors.push("Some selected students no longer belong to the source class or school.");return {valid:errors.length===0&&items.every(x=>x.promotionStatus==='Ready'),errors,items:items.map(x=>({...x,newYear:input.targetYear,newClass:input.targetClass,newSection:input.targetSection})),summary:{selected:selected.length,eligible:items.filter(x=>x.promotionStatus==='Ready').length,alreadyPromoted:items.filter(x=>x.promotionStatus==='Already promoted').length,errors:errors.length+items.filter(x=>x.promotionStatus==='Ineligible').length}}}
+type selectedPromotionItem={id:string;name:string;admission:string;status:string;sourceEnrollmentId:string;previousClass:string;previousSection:string;previousYear:string;promotionStatus:string};
+export async function promoteStudents(institutionId:string,userId:string,input:PromotionInput){const db=await ready(),batchId=randomUUID();let promoted=0;await db.begin(async tx=>{const preview=await validatePromotion(institutionId,input,tx);if(!preview.valid)throw new Error(preview.errors[0]||preview.items.find(x=>x.promotionStatus!=='Ready')?.promotionStatus||"Promotion validation failed.");await run("INSERT INTO promotion_batches(id,institution_id,source_academic_year,target_academic_year,source_class,source_section,target_class,target_section,promoted_by,status)VALUES(?,?,?,?,?,?,?,?,?,'Completed')",[batchId,institutionId,input.sourceYear,input.targetYear,input.sourceClass,input.sourceSection,input.targetClass,input.targetSection,userId],tx);for(const item of preview.items){const targetId=randomUUID();await run("INSERT INTO student_enrollments(id,institution_id,student_id,academic_year,class_name,section,status,promoted_from_enrollment_id,promoted_at,promoted_by)VALUES(?,?,?,?,?,?,'Active',?,CURRENT_TIMESTAMP,?)",[targetId,institutionId,item.id,input.targetYear,input.targetClass,input.targetSection,item.sourceEnrollmentId,userId],tx);await run("UPDATE student_enrollments SET status='Promoted',updated_at=CURRENT_TIMESTAMP WHERE id=? AND institution_id=?",[item.sourceEnrollmentId,institutionId],tx);await run("UPDATE students SET academic_year=?,class_name=?,section=?,grade=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND institution_id=?",[input.targetYear,input.targetClass,input.targetSection,`${input.targetClass}${input.targetSection?`-${input.targetSection}`:''}`,item.id,institutionId],tx);await run("INSERT INTO promotion_items(id,batch_id,institution_id,student_id,source_enrollment_id,target_enrollment_id,status)VALUES(?,?,?,?,?,?,'Promoted')",[randomUUID(),batchId,institutionId,item.id,item.sourceEnrollmentId,targetId],tx);promoted++}await audit(institutionId,userId,"Students Promoted","PromotionBatch",batchId,{...input,studentIds:undefined,count:promoted},tx)});return {batchId,promoted}}
+export async function listPromotionHistory(institutionId:string,search=""){const q=`%${search}%`;return rows('SELECT pi.id,pi.student_id AS "studentId",s.name AS "studentName",s.admission,se.class_name AS "previousClass",se.section AS "previousSection",se.academic_year AS "previousYear",te.class_name AS "newClass",te.section AS "newSection",te.academic_year AS "newYear",u.name AS "promotedBy",pb.promoted_at::text AS "promotedAt",pi.status FROM promotion_items pi JOIN promotion_batches pb ON pb.id=pi.batch_id JOIN students s ON s.id=pi.student_id JOIN student_enrollments se ON se.id=pi.source_enrollment_id JOIN student_enrollments te ON te.id=pi.target_enrollment_id JOIN users u ON u.id=pb.promoted_by WHERE pi.institution_id=? AND (s.name ILIKE ? OR s.admission ILIKE ?) ORDER BY pb.promoted_at DESC',[institutionId,q,q],await ready())}
+export async function studentAcademicHistory(institutionId:string,studentId:string){return rows('SELECT e.id,e.academic_year AS "academicYear",e.class_name AS "className",e.section,e.status,e.promoted_at::text AS "promotedAt",u.name AS "promotedBy" FROM student_enrollments e LEFT JOIN users u ON u.id=e.promoted_by WHERE e.institution_id=? AND e.student_id=? ORDER BY e.academic_year DESC',[institutionId,studentId],await ready())}
 export async function listAuditLogs(institutionId: string, limit = 100) {
   return await rows(
     'SELECT a.id,a.action,a.entity,a.entity_id AS "entityId",a.details,a.created_at::text AS "createdAt",u.name AS "userName" FROM audit_logs a LEFT JOIN users u ON u.id=a.user_id WHERE a.institution_id=? ORDER BY a.created_at DESC LIMIT ?',
@@ -1929,3 +2021,44 @@ export async function accountsSummary(institutionId:string,academicYear:string){
  const paymentMonths=await rows<{month:string;amount:number}>('SELECT SUBSTRING(p.payment_date,1,7) AS "month",COALESCE(SUM(p.amount),0) amount FROM payments p JOIN fees f ON f.id=p.fee_id WHERE p.institution_id=? AND f.academic_year=? AND p.status=\'Success\' GROUP BY SUBSTRING(p.payment_date,1,7)',[institutionId,academicYear],db);for(const item of monthly){item.feeCollections=paise(paymentMonths.find(p=>p.month===item.key)?.amount||0)}
  return{academicYear,feeExpected,totalCollected:feeCollections,totalExpenses,netProfitLoss:totalIncome-totalExpenses,totalIncome,totalExpenditure:totalExpenses,incomeStreams:{feeCollections,cashBookIncome:cashIncome,otherIncome,grandTotal:totalIncome},expenditureStreams:{staffSalaries:salary,cashBookExpenses:cashExpenses,otherExpenses,grandTotal:totalExpenses},monthly:monthly.map(x=>({...x,income:x.feeCollections+x.otherIncome,expenses:x.staffSalaries+x.otherExpenses,net:x.feeCollections+x.otherIncome-x.staffSalaries-x.otherExpenses}))};
 }
+
+export type SalaryInput={employeeKey:string;month:number;year:number;basicPaise:number;allowancesPaise:number;bonusPaise:number;overtimePaise:number;otherEarningsPaise:number;deductionsPaise:number;advanceDeductionPaise:number;otherDeductionsPaise:number;notes:string};
+export async function adminSalaryEmployees(){const db=await ready();return rows<{key:string;teacherId:string|null;userId:string|null;name:string;employeeId:string;role:string;department:string;designation:string;institutionId:string;school:string;joiningDate:string;defaultSalaryPaise:number}>(`SELECT 'teacher:'||t.id AS key,t.id AS "teacherId",NULL AS "userId",t.name,t.employee_id AS "employeeId",'Teacher' AS role,t.department,t.subject AS designation,t.institution_id AS "institutionId",i.name AS school,t.joining_date AS "joiningDate",CAST(ROUND(t.salary*100) AS INTEGER) AS "defaultSalaryPaise" FROM teachers t JOIN institutions i ON i.id=t.institution_id WHERE t.status='Active' UNION ALL SELECT 'user:'||u.id,NULL,u.id,u.name,u.id,'Staff','',u.role,u.institution_id,i.name,'',0 FROM users u JOIN institutions i ON i.id=u.institution_id WHERE u.role='STAFF' AND COALESCE(u.status,'Active')='Active' ORDER BY 4`,[],db)}
+export async function adminSalaryData(filters:{search?:string;status?:string;month?:number;year?:number;school?:string;limit?:number;offset?:number}={}){const db=await ready(),where:string[]=["1=1"],args:unknown[]=[];if(filters.search){where.push('(s.employee_name ILIKE ? OR s.employee_number ILIKE ? OR s.payslip_number ILIKE ?)');args.push(`%${filters.search}%`,`%${filters.search}%`,`%${filters.search}%`)}if(filters.status){where.push('s.payment_status=?');args.push(filters.status)}if(filters.month){where.push('s.salary_month=?');args.push(filters.month)}if(filters.year){where.push('s.salary_year=?');args.push(filters.year)}if(filters.school){where.push('s.institution_id=?');args.push(filters.school)}const clause=where.join(' AND '),total=await row<{count:number}>(`SELECT COUNT(*)::int count FROM salaries s WHERE ${clause}`,args,db),items=await rows<Record<string,unknown>>(`SELECT s.id,s.institution_id AS "institutionId",i.name AS school,s.employee_key AS "employeeKey",s.employee_name AS "employeeName",s.employee_number AS "employeeId",s.employee_role AS role,s.department,s.designation,s.salary_month AS month,s.salary_year AS year,s.basic_paise AS "basicPaise",s.allowances_paise AS "allowancesPaise",s.bonus_paise AS "bonusPaise",s.overtime_paise AS "overtimePaise",s.other_earnings_paise AS "otherEarningsPaise",s.gross_paise AS "grossPaise",s.deductions_paise AS "deductionsPaise",s.advance_deduction_paise AS "advanceDeductionPaise",s.other_deductions_paise AS "otherDeductionsPaise",s.total_deductions_paise AS "totalDeductionsPaise",s.net_paise AS "netPaise",s.paid_paise AS "paidPaise",s.payment_status AS "paymentStatus",s.payment_date AS "paymentDate",s.payment_method AS "paymentMethod",s.payment_reference AS "paymentReference",s.payment_notes AS "paymentNotes",s.notes,s.payslip_number AS "payslipNumber",s.created_at::text AS "createdAt" FROM salaries s JOIN institutions i ON i.id=s.institution_id WHERE ${clause} ORDER BY s.salary_year DESC,s.salary_month DESC,s.created_at DESC LIMIT ? OFFSET ?`,[...args,Math.min(filters.limit||25,100),filters.offset||0],db),now=new Date(),currentMonth=now.getMonth()+1,currentYear=now.getFullYear(),summary=await row<Record<string,number>>(`SELECT COUNT(*)::int records,COALESCE(SUM(net_paise),0)::int "totalSalary",COALESCE(SUM(CASE WHEN payment_status='Paid' THEN paid_paise ELSE 0 END),0)::int paid,COALESCE(SUM(CASE WHEN payment_status NOT IN ('Paid','Cancelled') THEN net_paise-paid_paise ELSE 0 END),0)::int pending,COALESCE(SUM(CASE WHEN salary_month=? AND salary_year=? THEN net_paise ELSE 0 END),0)::int "currentMonth",COALESCE(SUM(CASE WHEN salary_year=? THEN net_paise ELSE 0 END),0)::int "thisYear" FROM salaries`,[currentMonth,currentYear,currentYear],db),employees=await adminSalaryEmployees();return{items,total:total.count,summary:{...summary,teachers:employees.filter(x=>x.role==='Teacher').length,staff:employees.filter(x=>x.role==='Staff').length,employees:employees.length},employees}}
+export async function createAdminSalary(adminId:string,input:SalaryInput){const db=await ready(),employees=await adminSalaryEmployees(),employee=employees.find(x=>x.key===input.employeeKey);if(!employee)throw new Error('Employee not found.');const gross=input.basicPaise+input.allowancesPaise+input.bonusPaise+input.overtimePaise+input.otherEarningsPaise,totalDeductions=input.deductionsPaise+input.advanceDeductionPaise+input.otherDeductionsPaise,net=gross-totalDeductions;if(net<0)throw new Error('Deductions cannot exceed gross salary.');return db.begin(async tx=>{const id=randomUUID(),payslip=`PAY-${input.year}-${String(input.month).padStart(2,'0')}-${id.slice(0,8).toUpperCase()}`;await run('INSERT INTO salaries(id,institution_id,employee_key,teacher_id,user_id,employee_name,employee_number,employee_role,department,designation,salary_month,salary_year,basic_paise,allowances_paise,bonus_paise,overtime_paise,other_earnings_paise,gross_paise,deductions_paise,advance_deduction_paise,other_deductions_paise,total_deductions_paise,net_paise,payslip_number,notes,created_by)VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',[id,employee.institutionId,employee.key,employee.teacherId,employee.userId,employee.name,employee.employeeId,employee.role,employee.department,employee.designation,input.month,input.year,input.basicPaise,input.allowancesPaise,input.bonusPaise,input.overtimePaise,input.otherEarningsPaise,gross,input.deductionsPaise,input.advanceDeductionPaise,input.otherDeductionsPaise,totalDeductions,net,payslip,input.notes,adminId],tx);await audit(employee.institutionId,adminId,'Salary Added','Salary',id,{employee:employee.name,month:input.month,year:input.year,netPaise:net},tx);return{id,payslipNumber:payslip}})}
+export async function updateAdminSalaryPayment(adminId:string,id:string,input:{status:string;paidPaise:number;paymentDate:string;paymentMethod:string;paymentReference:string;paymentNotes:string}){const db=await ready(),salary=await row<{institutionId:string;netPaise:number}>(`SELECT institution_id AS "institutionId",net_paise AS "netPaise" FROM salaries WHERE id=?`,[id],db);if(!salary)throw new Error('Salary record not found.');if(input.paidPaise<0||input.paidPaise>salary.netPaise)throw new Error('Paid amount is invalid.');if(input.status==='Paid'&&input.paidPaise!==salary.netPaise)throw new Error('Paid amount must equal net salary.');await db.begin(async tx=>{await run('UPDATE salaries SET payment_status=?,paid_paise=?,payment_date=?,payment_method=?,payment_reference=?,payment_notes=?,updated_at=CURRENT_TIMESTAMP WHERE id=?',[input.status,input.paidPaise,input.paymentDate||null,input.paymentMethod,input.paymentReference,input.paymentNotes,id],tx);await audit(salary.institutionId,adminId,'Salary Payment Updated','Salary',id,{status:input.status,paidPaise:input.paidPaise,reference:input.paymentReference},tx)});return true}
+export async function cancelAdminSalary(adminId:string,id:string){const db=await ready(),salary=await row<{institutionId:string;paymentStatus:string}>(`SELECT institution_id AS "institutionId",payment_status AS "paymentStatus" FROM salaries WHERE id=?`,[id],db);if(!salary)throw new Error('Salary record not found.');if(salary.paymentStatus==='Paid')throw new Error('Paid salary records cannot be cancelled.');await run("UPDATE salaries SET payment_status='Cancelled',updated_at=CURRENT_TIMESTAMP WHERE id=?",[id],db);await audit(salary.institutionId,adminId,'Salary Cancelled','Salary',id,{},db)}
+export async function getAdminSalary(id:string){return row<Record<string,unknown>>(`SELECT s.*,i.name AS school,st.school_address AS address,st.school_phone AS phone,st.school_email AS email,st.payslip_title AS "payslipTitle",st.payslip_subheader AS "payslipSubheader",st.footer_text AS footer,st.signature_label AS "signatureLabel" FROM salaries s JOIN institutions i ON i.id=s.institution_id LEFT JOIN settings st ON st.institution_id=s.institution_id WHERE s.id=?`,[id],await ready())}
+
+export type AdminRange={from?:string;to?:string;search?:string;status?:string;school?:string;limit?:number;offset?:number};
+const n=(value:unknown)=>Number(value||0);
+export async function adminOverview(range:AdminRange={}){
+ const db=await ready(),today=new Date().toISOString().slice(0,10),month=today.slice(0,7),year=today.slice(0,4),from=range.from||"0000-01-01",to=range.to||"9999-12-31";
+ const [users,students,teachers,parents,staff,schools,subs,feeRevenue,subscriptionRevenue,paymentStates,outstanding,growth,revenueTrend,recent]=await Promise.all([
+  row<Record<string,number>>("SELECT COUNT(*)::int total,COALESCE(SUM(CASE WHEN status='Active' THEN 1 ELSE 0 END),0)::int active,COALESCE(SUM(CASE WHEN status='Inactive' THEN 1 ELSE 0 END),0)::int inactive,COALESCE(SUM(CASE WHEN status='Suspended' THEN 1 ELSE 0 END),0)::int suspended,COALESCE(SUM(CASE WHEN status='Pending' THEN 1 ELSE 0 END),0)::int pending,COALESCE(SUM(CASE WHEN SUBSTRING(created_at::text,1,10)=? THEN 1 ELSE 0 END),0)::int today,COALESCE(SUM(CASE WHEN SUBSTRING(created_at::text,1,7)=? THEN 1 ELSE 0 END),0)::int month FROM users",[today,month],db),
+  row<{count:number}>("SELECT COUNT(*)::int count FROM students",[],db),row<{count:number}>("SELECT COUNT(*)::int count FROM teachers",[],db),
+  row<{count:number}>("SELECT COUNT(DISTINCT CASE WHEN parent_email<>'' THEN parent_email ELSE parent_phone END)::int count FROM students WHERE parent_email<>'' OR parent_phone<>''",[],db),
+  row<{count:number}>("SELECT COUNT(*)::int count FROM users WHERE role IN ('STAFF','ACCOUNTANT','LIBRARIAN')",[],db),
+  row<Record<string,number>>("SELECT COUNT(*)::int total,COALESCE(SUM(CASE WHEN status='Active' THEN 1 ELSE 0 END),0)::int active,COALESCE(SUM(CASE WHEN status='Inactive' THEN 1 ELSE 0 END),0)::int inactive,COALESCE(SUM(CASE WHEN status='Suspended' THEN 1 ELSE 0 END),0)::int suspended,COALESCE(SUM(CASE WHEN status='Pending' THEN 1 ELSE 0 END),0)::int pending,COALESCE(SUM(CASE WHEN SUBSTRING(created_at::text,1,7)=? THEN 1 ELSE 0 END),0)::int month FROM institutions",[month],db),
+  row<Record<string,number>>("SELECT COALESCE(SUM(CASE WHEN status='ACTIVE' AND expiry_date>CURRENT_TIMESTAMP THEN 1 ELSE 0 END),0)::int paid,COALESCE(SUM(CASE WHEN status='PENDING' THEN 1 ELSE 0 END),0)::int trial,COALESCE(SUM(CASE WHEN status='EXPIRED' OR expiry_date<=CURRENT_TIMESTAMP THEN 1 ELSE 0 END),0)::int expired FROM subscriptions",[],db),
+  row<{total:number}>("SELECT COALESCE(SUM(amount),0) total FROM payments WHERE status='Success' AND payment_date>=? AND payment_date<=?",[from,to],db),
+  row<{total:number}>("SELECT COALESCE(SUM(amount),0) total FROM subscription_payments WHERE status='SUCCESS' AND payment_date>=? AND payment_date<=?",[from,to],db),
+  row<Record<string,number>>("SELECT COALESCE(SUM(CASE WHEN status='Success' THEN 1 ELSE 0 END),0)::int success,COALESCE(SUM(CASE WHEN status='Pending' THEN 1 ELSE 0 END),0)::int pending,COALESCE(SUM(CASE WHEN status='Failed' THEN 1 ELSE 0 END),0)::int failed FROM payments",[],db),
+  row<{total:number}>("SELECT COALESCE(SUM(pending_amount),0) total FROM fees WHERE status IN ('Pending','Partial','Overdue')",[],db),
+  rows<{period:string;users:number;schools:number}>("SELECT SUBSTRING(created_at::text,1,7) period,COUNT(*)::int users,COUNT(DISTINCT institution_id)::int schools FROM users GROUP BY SUBSTRING(created_at::text,1,7) ORDER BY period DESC LIMIT 12",[],db),
+  rows<{period:string;amount:number}>("SELECT period,SUM(amount) amount FROM (SELECT SUBSTRING(payment_date,1,7) period,amount FROM payments WHERE status='Success' UNION ALL SELECT SUBSTRING(payment_date,1,7),amount FROM subscription_payments WHERE status='SUCCESS') x GROUP BY period ORDER BY period DESC LIMIT 12",[],db),
+  rows<Record<string,unknown>>("SELECT a.id,a.action,a.entity,a.entity_id AS \"entityId\",a.created_at::text AS \"createdAt\",u.name AS \"userName\",i.name AS \"schoolName\" FROM audit_logs a LEFT JOIN users u ON u.id=a.user_id LEFT JOIN institutions i ON i.id=a.institution_id ORDER BY a.created_at DESC LIMIT 12",[],db)
+ ]);
+ const weekStart=new Date(Date.now()-6*864e5).toISOString().slice(0,10),periodRevenue=await row<Record<string,number>>("SELECT COALESCE(SUM(CASE WHEN payment_date=? THEN amount ELSE 0 END),0) today,COALESCE(SUM(CASE WHEN payment_date>=? THEN amount ELSE 0 END),0) week,COALESCE(SUM(CASE WHEN SUBSTRING(payment_date,1,7)=? THEN amount ELSE 0 END),0) month,COALESCE(SUM(CASE WHEN SUBSTRING(payment_date,1,4)=? THEN amount ELSE 0 END),0) year FROM (SELECT payment_date,amount FROM payments WHERE status='Success' UNION ALL SELECT payment_date,amount FROM subscription_payments WHERE status='SUCCESS') verified",[today,weekStart,month,year],db),totalRevenue=n(feeRevenue.total)+n(subscriptionRevenue.total);
+ return{generatedAt:new Date().toISOString(),range:{from:range.from||null,to:range.to||null},users:{...users,students:students.count,teachers:teachers.count,parents:parents.count,staff:staff.count},schools:{...schools,paid:subs.paid,trial:subs.trial},subscriptions:subs,finance:{totalRevenue,feeRevenue:n(feeRevenue.total),subscriptionRevenue:n(subscriptionRevenue.total),outstanding:n(outstanding.total),successful:paymentStates.success,pending:paymentStates.pending,failed:paymentStates.failed,refunded:0,todayRevenue:n(periodRevenue.today),weekRevenue:n(periodRevenue.week),monthRevenue:n(periodRevenue.month),yearRevenue:n(periodRevenue.year)},growth:growth.reverse(),revenueTrend:revenueTrend.reverse(),recent};
+}
+
+export async function adminUsers(filters:AdminRange={}){const db=await ready(),where=["1=1"],args:unknown[]=[];if(filters.search){where.push("(u.name ILIKE ? OR u.email ILIKE ? OR i.name ILIKE ?)");const q=`%${filters.search}%`;args.push(q,q,q)}if(filters.status){where.push("u.status=?");args.push(filters.status)}if(filters.school){where.push("u.institution_id=?");args.push(filters.school)}const limit=Math.min(filters.limit||50,100),offset=Math.max(filters.offset||0,0);const total=(await row<{count:number}>(`SELECT COUNT(*)::int count FROM users u JOIN institutions i ON i.id=u.institution_id WHERE ${where.join(" AND ")}`,args,db)).count,items=await rows(`SELECT u.id,u.name,u.email,u.role,u.status,u.created_at::text AS \"createdAt\",u.last_login_at::text AS \"lastLogin\",i.id AS \"schoolId\",i.name AS \"schoolName\",COALESCE(sp.name,'No plan') AS \"planName\",COALESCE(s.status,'NONE') AS \"paymentStatus\" FROM users u JOIN institutions i ON i.id=u.institution_id LEFT JOIN subscriptions s ON s.id=(SELECT s2.id FROM subscriptions s2 WHERE s2.institution_id=i.id ORDER BY s2.created_at DESC LIMIT 1) LEFT JOIN subscription_plans sp ON sp.id=s.plan_id WHERE ${where.join(" AND ")} ORDER BY u.created_at DESC LIMIT ? OFFSET ?`,[...args,limit,offset],db);return{items,total,limit,offset}}
+export async function adminSchools(filters:AdminRange={}){const db=await ready(),where=["1=1"],args:unknown[]=[];if(filters.search){where.push("(i.name ILIKE ? OR COALESCE(a.email,'') ILIKE ?)");const q=`%${filters.search}%`;args.push(q,q)}if(filters.status){where.push("i.status=?");args.push(filters.status)}const limit=Math.min(filters.limit||50,100),offset=Math.max(filters.offset||0,0);const total=(await row<{count:number}>(`SELECT COUNT(*)::int count FROM institutions i LEFT JOIN users a ON a.id=(SELECT u.id FROM users u WHERE u.institution_id=i.id AND u.role IN ('SCHOOL_ADMIN','SUPER_ADMIN') ORDER BY u.created_at LIMIT 1) WHERE ${where.join(" AND ")}`,args,db)).count,items=await rows(`SELECT i.id,i.name,i.status,i.created_at::text AS \"createdAt\",a.name AS \"adminName\",a.email,(SELECT COUNT(*) FROM students st WHERE st.institution_id=i.id)::int AS students,(SELECT COUNT(*) FROM teachers t WHERE t.institution_id=i.id)::int AS teachers,COALESCE(sp.name,'No plan') AS \"planName\",COALESCE(s.status,'NONE') AS \"subscriptionStatus\",COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.institution_id=i.id AND p.status='Success'),0)+COALESCE((SELECT SUM(x.amount) FROM subscription_payments x WHERE x.institution_id=i.id AND x.status='SUCCESS'),0) AS revenue FROM institutions i LEFT JOIN users a ON a.id=(SELECT u.id FROM users u WHERE u.institution_id=i.id AND u.role IN ('SCHOOL_ADMIN','SUPER_ADMIN') ORDER BY u.created_at LIMIT 1) LEFT JOIN subscriptions s ON s.id=(SELECT s2.id FROM subscriptions s2 WHERE s2.institution_id=i.id ORDER BY s2.created_at DESC LIMIT 1) LEFT JOIN subscription_plans sp ON sp.id=s.plan_id WHERE ${where.join(" AND ")} ORDER BY i.created_at DESC LIMIT ? OFFSET ?`,[...args,limit,offset],db);return{items,total,limit,offset}}
+export async function adminTransactions(filters:AdminRange={}){const db=await ready(),where=["1=1"],args:unknown[]=[];if(filters.search){where.push("(p.receipt_number ILIKE ? OR p.transaction_id ILIKE ? OR st.name ILIKE ? OR i.name ILIKE ?)");const q=`%${filters.search}%`;args.push(q,q,q,q)}if(filters.status){where.push("p.status=?");args.push(filters.status)}if(filters.school){where.push("p.institution_id=?");args.push(filters.school)}if(filters.from){where.push("p.payment_date>=?");args.push(filters.from)}if(filters.to){where.push("p.payment_date<=?");args.push(filters.to)}const limit=Math.min(filters.limit||50,100),offset=Math.max(filters.offset||0,0);const total=(await row<{count:number}>(`SELECT COUNT(*)::int count FROM payments p JOIN students st ON st.id=p.student_id JOIN institutions i ON i.id=p.institution_id WHERE ${where.join(" AND ")}`,args,db)).count,items=await rows(`SELECT p.id,p.receipt_number AS \"receiptNumber\",p.transaction_id AS \"transactionId\",st.name AS \"studentName\",i.id AS \"schoolId\",i.name AS \"schoolName\",p.amount,p.payment_method AS \"method\",p.status,p.payment_date AS \"paymentDate\" FROM payments p JOIN students st ON st.id=p.student_id JOIN institutions i ON i.id=p.institution_id WHERE ${where.join(" AND ")} ORDER BY p.payment_date DESC,p.created_at DESC LIMIT ? OFFSET ?`,[...args,limit,offset],db);return{items,total,limit,offset}}
+export async function adminSubscriptions(){return rows(`SELECT s.id,i.name AS \"schoolName\",sp.name AS \"planName\",s.student_capacity AS \"studentCapacity\",s.amount_paid AS \"amountPaid\",s.status,s.activation_date::text AS \"activationDate\",s.expiry_date::text AS \"expiryDate\",s.created_at::text AS \"createdAt\" FROM subscriptions s JOIN institutions i ON i.id=s.institution_id JOIN subscription_plans sp ON sp.id=s.plan_id ORDER BY s.created_at DESC`,[],await ready())}
+export async function adminAuditLogs(limit=100){return rows(`SELECT a.id,a.action,a.entity,a.entity_id AS \"entityId\",a.details,a.created_at::text AS \"createdAt\",u.name AS \"userName\",u.email,i.name AS \"schoolName\" FROM audit_logs a LEFT JOIN users u ON u.id=a.user_id LEFT JOIN institutions i ON i.id=a.institution_id ORDER BY a.created_at DESC LIMIT ?`,[Math.min(limit,500)],await ready())}
+export async function adminSetUserStatus(adminId:string,id:string,status:"Active"|"Inactive"|"Suspended"){if(adminId===id)throw new Error("The private admin account cannot be disabled");const db=await ready(),target=await row<{institutionId:string}>("SELECT institution_id AS \"institutionId\" FROM users WHERE id=?",[id],db);if(!target)throw new Error("User not found");await run("UPDATE users SET status=? WHERE id=?",[status,id],db);await audit(target.institutionId,adminId,`User ${status}`,"User",id,{status},db)}
+export async function adminSetSchoolStatus(adminId:string,id:string,status:"Active"|"Inactive"|"Suspended"){const db=await ready(),target=await row<{id:string}>("SELECT id FROM institutions WHERE id=?",[id],db);if(!target)throw new Error("School not found");await run("UPDATE institutions SET status=? WHERE id=?",[status,id],db);await audit(id,adminId,`School ${status}`,"Institution",id,{status},db)}
+export async function getAdminSettings(){const db=await ready();await run("INSERT INTO admin_settings(id)VALUES('global') ON CONFLICT(id) DO NOTHING",[],db);return row<Record<string,unknown>>('SELECT application_name AS "applicationName",support_email AS "supportEmail",currency,timezone,date_format AS "dateFormat",session_timeout_minutes AS "sessionTimeoutMinutes",updated_at::text AS "updatedAt" FROM admin_settings WHERE id=\'global\'',[],db)}
+export async function saveAdminSettings(adminId:string,input:{applicationName:string;supportEmail:string;currency:string;timezone:string;dateFormat:string;sessionTimeoutMinutes:number}){const db=await ready();await run("INSERT INTO admin_settings(id,application_name,support_email,currency,timezone,date_format,session_timeout_minutes,updated_by)VALUES('global',?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET application_name=EXCLUDED.application_name,support_email=EXCLUDED.support_email,currency=EXCLUDED.currency,timezone=EXCLUDED.timezone,date_format=EXCLUDED.date_format,session_timeout_minutes=EXCLUDED.session_timeout_minutes,updated_by=EXCLUDED.updated_by,updated_at=CURRENT_TIMESTAMP",[input.applicationName,input.supportEmail,input.currency,input.timezone,input.dateFormat,input.sessionTimeoutMinutes,adminId],db);const admin=await row<{institutionId:string}>("SELECT institution_id AS \"institutionId\" FROM users WHERE id=?",[adminId],db);if(admin)await audit(admin.institutionId,adminId,"Admin Settings Updated","AdminSettings","global",{},db);return getAdminSettings()}

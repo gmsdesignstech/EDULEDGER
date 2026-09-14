@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import * as XLSX from "xlsx";
 import { currentUser } from "@/lib/session";
-import { accountsSummary,getInstitution,listAccountTransactions,listPayments,logExport } from "@/lib/db";
+import { accountsSummary,getInstitution,getSchoolAsset,listAccountTransactions,listPayments,logExport } from "@/lib/db";
 import { createFinancialReportPdf } from "@/lib/financial-report-pdf";
 export const runtime="nodejs";
 const roles=["SCHOOL_ADMIN","SUPER_ADMIN","ACCOUNTANT"],reports=["income","expense","fees","salary","monthly-profit-loss","cash-book","academic-year"] as const;type Report=typeof reports[number];
@@ -10,10 +10,10 @@ const money=(value:number)=>`Rs. ${Number(value||0).toLocaleString("en-IN",{mini
 
 export async function GET(request:Request){
  const user=await currentUser();if(!user)return NextResponse.json({error:"Unauthenticated"},{status:401});if(!roles.includes(user.role))return NextResponse.json({error:"Forbidden"},{status:403});
- const q=new URL(request.url).searchParams,institution=await getInstitution(user.institutionId),requestedYear=q.get("year")||institution.academicYear;if(!/^\d{4}[-–]\d{4}$/.test(requestedYear))return NextResponse.json({error:"Invalid academic year."},{status:400});
+ const q=new URL(request.url).searchParams,[institution,asset]=await Promise.all([getInstitution(user.institutionId),getSchoolAsset(user.institutionId,"logo")]),requestedYear=q.get("year")||institution.academicYear;if(!/^\d{4}[-–]\d{4}$/.test(requestedYear))return NextResponse.json({error:"Invalid academic year."},{status:400});
  const year=requestedYear.replace("–","-"),requestedReport=q.get("report")||"cash-book";if(!reports.includes(requestedReport as Report))return NextResponse.json({error:"Unsupported financial report."},{status:400});
  const report=requestedReport as Report,format=q.get("format")==="pdf"?"pdf":q.get("format")==="csv"?"csv":"xlsx",built=await buildReport(user.institutionId,report,year,q);await logExport(user.institutionId,user.id,`Accounts ${report}`,built.rows.length);const baseName=`EduLedger_${titles[report].replace(/\s*\/\s*|\s+/g,"_")}_${year}`;
- if(format==="pdf"){try{const data=await createFinancialReportPdf({title:titles[report],academicYear:year,school:institution,...built});return new Response(Buffer.from(data),{headers:{"Content-Type":"application/pdf","Content-Disposition":`inline; filename="${baseName}.pdf"`,"Cache-Control":"private, no-store"}})}catch{return NextResponse.json({error:"Could not generate the PDF report."},{status:500})}}
+ if(format==="pdf"){try{const data=await createFinancialReportPdf({title:titles[report],academicYear:year,school:{...institution,logo:asset?{mimeType:asset.mimeType,data:new Uint8Array(asset.data)}:undefined},...built,filters:[q.get("class")&&`Class: ${q.get("class")}`,q.get("section")&&`Section: ${q.get("section")}`,q.get("method")&&`Method: ${q.get("method")}`,q.get("from")&&`From: ${q.get("from")}`,q.get("to")&&`To: ${q.get("to")}`].filter(Boolean) as string[]});return new Response(Buffer.from(data),{headers:{"Content-Type":"application/pdf","Content-Disposition":`inline; filename="${baseName}.pdf"`,"Cache-Control":"private, no-store"}})}catch{return NextResponse.json({error:"Could not generate the PDF report."},{status:500})}}
  const sheet=XLSX.utils.json_to_sheet(built.exportRows),book=XLSX.utils.book_new();XLSX.utils.book_append_sheet(book,sheet,"Accounts");const data=format==="csv"?XLSX.utils.sheet_to_csv(sheet):XLSX.write(book,{type:"buffer",bookType:"xlsx"});return new Response(data,{headers:{"Content-Type":format==="csv"?"text/csv; charset=utf-8":"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet","Content-Disposition":`attachment; filename="${baseName}.${format}"`,"Cache-Control":"private, no-store"}})
 }
 

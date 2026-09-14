@@ -4,6 +4,7 @@ import { addModuleRecord, listModuleRecords } from "@/lib/db";
 import { currentUser } from "@/lib/session";
 import { moduleConfigs } from "@/config/modules";
 export const runtime = "nodejs";
+const noStore={"Cache-Control":"private, no-store"};
 const bodySchema = z.record(z.string().min(1).max(500));
 export async function GET(
   _: Request,
@@ -14,11 +15,8 @@ export async function GET(
     return NextResponse.json({ error: "Unauthenticated" }, { status: 401 });
   const { module } = await params,
     config = moduleConfigs[module];
-  if (!config)
-    return NextResponse.json({ error: "Unknown module" }, { status: 404 });
-  return NextResponse.json({
-    records: await listModuleRecords(user.institutionId, module),
-  });
+  if (!config)return NextResponse.json({ error: "Unknown module" }, { status: 404,headers:noStore });
+  try{return NextResponse.json({records:await listModuleRecords(user.institutionId,module)},{headers:noStore});}catch{return NextResponse.json({error:"Could not load module records."},{status:500,headers:noStore})}
 }
 export async function POST(
   request: Request,

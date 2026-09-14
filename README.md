@@ -8,6 +8,17 @@ EduLedger is a production-oriented, multi-role school operations platform built 
 2. Start the app: `npm run dev`.
 3. Register a school account at `/register`, then sign in at `/login`.
 
+### Private Super Admin setup
+
+Public registration always creates a `SCHOOL_ADMIN`; it never creates a platform administrator. After creating the one private owner account, promote it once from a trusted database console and bind the deployment to that same immutable user ID:
+
+```sql
+UPDATE users SET role = 'SUPER_ADMIN' WHERE email = 'owner@example.com';
+SELECT id, email, role FROM users WHERE email = 'owner@example.com';
+```
+
+Set the returned ID as `ADMIN_USER_ID` in the server environment (preferred), or set `ADMIN_EMAIL` if an ID cannot be used, and restart/redeploy. The database has a partial unique index allowing only one `SUPER_ADMIN`. Admin access requires an active session, the `SUPER_ADMIN` database role, and an exact match with the server-side configured identity. The private portal is `/admin/login`; do not place these values in `NEXT_PUBLIC_*` variables.
+
 Development uses the existing local SQLite database when no PostgreSQL connection string is configured. To use PostgreSQL locally, copy `.env.example` to `.env.local` and set `DATABASE_URL`. The schema and subscription plans are created idempotently on the first database request. Passwords are bcrypt-hashed, and sessions use random server-side tokens in secure HTTP-only cookies.
 
 The dashboard is protected on the server. Unauthenticated requests are redirected to `/login`; student reads and writes are scoped to the institution attached to the authenticated session.

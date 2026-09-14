@@ -1,1 +1,50 @@
-import{listAuditLogs}from"@/lib/db";import{requireUser}from"@/lib/session";export const runtime="nodejs";export default async function Page(){const user=await requireUser(),logs=await listAuditLogs(user.institutionId,200);return <div className="mx-auto max-w-6xl"><p className="label">Management</p><h1 className="mt-2 text-3xl font-black">Audit Log</h1><p className="mt-1 text-muted">Financial and system actions retained for accountability.</p><section className="card mt-7 overflow-hidden"><div className="overflow-x-auto"><table className="w-full whitespace-nowrap text-left text-sm"><thead className="bg-canvas text-xs uppercase text-muted"><tr><th className="px-5 py-4">Timestamp</th><th className="px-5">Action</th><th className="px-5">Entity</th><th className="px-5">User</th></tr></thead><tbody className="divide-y">{logs.map(log=><tr key={String(log.id)}><td className="px-5 py-4">{new Date(String(log.createdAt)+"Z").toLocaleString("en-IN")}</td><td className="px-5 font-bold">{String(log.action)}</td><td className="px-5">{String(log.entity)}</td><td className="px-5">{String(log.userName||"System")}</td></tr>)}</tbody></table>{!logs.length&&<p className="p-12 text-center text-muted">No audit records yet.</p>}</div></section></div>}
+import { AuditLogDashboard } from "@/components/audit-log-dashboard";
+import {
+  accountsSummary,
+  getInstitution,
+  listAuditLogs,
+} from "@/lib/db";
+import { requireUser } from "@/lib/session";
+
+export const runtime = "nodejs";
+
+export default async function Page() {
+  const user = await requireUser();
+  const institution = await getInstitution(user.institutionId);
+  const start = Number(institution.academicYear.slice(0, 4));
+  const years = [
+    `${start - 1}-${start}`,
+    institution.academicYear,
+    `${start + 1}-${start + 2}`,
+  ];
+  const logs = await listAuditLogs(user.institutionId, 500);
+  const summary = await accountsSummary(
+    user.institutionId,
+    institution.academicYear,
+  );
+
+  // Database rows can have a custom prototype and `details` can contain values
+  // that React cannot serialize across the Server/Client Component boundary.
+  const initialLogs = logs.map((log) => ({
+    id: String(log.id),
+    action: String(log.action),
+    entity: String(log.entity),
+    entityId: log.entityId == null ? null : String(log.entityId),
+    createdAt: String(log.createdAt),
+    userName: log.userName == null ? null : String(log.userName),
+  }));
+  const initialSummary = {
+    totalIncome: Number(summary.totalIncome ?? 0),
+    totalExpenses: Number(summary.totalExpenses ?? 0),
+    netProfitLoss: Number(summary.netProfitLoss ?? 0),
+  };
+
+  return (
+    <AuditLogDashboard
+      initialLogs={initialLogs}
+      initialSummary={initialSummary}
+      years={years}
+      activeYear={institution.academicYear}
+    />
+  );
+}
