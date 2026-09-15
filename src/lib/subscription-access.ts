@@ -1,9 +1,9 @@
 import "server-only";
 import { getSubscription } from "./db";
-import { capacityMessage } from "./subscription";
+import { capacityMessage,isSubscriptionActive } from "./subscription";
 export async function subscriptionAccessError(institutionId: string) {
   const subscription = await getSubscription(institutionId);
-  return subscription.status === "ACTIVE"
+  return isSubscriptionActive(subscription.status)
     ? null
     : {
         error:

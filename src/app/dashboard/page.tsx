@@ -10,8 +10,9 @@ import {
   WalletCards,
   FileText,
 } from "lucide-react";
-import { dashboardData, listClassSummaries } from "@/lib/db";
+import { dashboardData, getSubscription, listClassSummaries } from "@/lib/db";
 import { requireUser } from "@/lib/session";
+import { SubscriptionCard } from "@/components/subscription-card";
 export const runtime = "nodejs";
 const money = (n: number) =>
   new Intl.NumberFormat("en-IN", {
@@ -21,7 +22,7 @@ const money = (n: number) =>
   }).format(n);
 export default async function Dashboard() {
   const user = await requireUser(),
-    [data, classSummaries] = await Promise.all([dashboardData(user.institutionId), listClassSummaries(user.institutionId)]),
+    [data, classSummaries,subscription] = await Promise.all([dashboardData(user.institutionId), listClassSummaries(user.institutionId),getSubscription(user.institutionId)]),
     firstName = user.name.split(" ")[0],
     today = new Intl.DateTimeFormat("en-IN", {
       weekday: "long",
@@ -58,6 +59,7 @@ export default async function Dashboard() {
           </Link>
         </div>
       </div>
+      <SubscriptionCard subscription={subscription}/>
       <section className="mt-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {stats.map(([label, value, Icon]) => (
           <article className="card p-5" key={label}>

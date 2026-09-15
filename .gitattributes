@@ -1,0 +1,18 @@
+# Keep source files consistent across Windows development and Linux/Vercel builds.
+* text=auto eol=lf
+
+# Windows command scripts require CRLF for maximum compatibility.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Never perform line-ending conversion on binary assets.
+*.ico binary
+*.jpg binary
+*.jpeg binary
+*.png binary
+*.gif binary
+*.webp binary
+*.woff binary
+*.woff2 binary
+*.pdf binary
+*.xlsx binary
